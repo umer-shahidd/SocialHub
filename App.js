@@ -1,19 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import auth from '@react-native-firebase/auth';
+
+import { getApp } from '@react-native-firebase/app';
+import { getAuth, onAuthStateChanged } from '@react-native-firebase/auth';
+
 import AppNavigator from './src/navigation/AppNavigator';
 
 const App = () => {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
 
-  // Handle user state changes
   useEffect(() => {
-    const subscriber = auth().onAuthStateChanged(user => {
+    const app = getApp();
+    const auth = getAuth(app);
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       if (initializing) setInitializing(false);
     });
-    return subscriber; // unsubscribe on unmount
+
+    return unsubscribe;
   }, [initializing]);
 
   if (initializing) return null;

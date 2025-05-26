@@ -3,7 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity, SafeAreaView,
   KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Alert
 } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { getApp } from '@react-native-firebase/app';
+import {
+  getAuth,
+  signInWithEmailAndPassword
+} from '@react-native-firebase/auth';
 
 const Login = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -11,7 +15,7 @@ const Login = ({ navigation }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-   const handleLogin = async () => {
+  const handleLogin = async () => {
     if (!email || !password) {
       setError('Please enter email and password');
       return;
@@ -21,9 +25,13 @@ const Login = ({ navigation }) => {
     setError('');
 
     try {
-      await auth().signInWithEmailAndPassword(email, password);
-      // Navigation is handled automatically by the auth state listener
-       navigation.navigate('Home');
+      const app = getApp();
+      const auth = getAuth(app);
+
+      await signInWithEmailAndPassword(auth, email, password);
+
+      // Optional: you may want to rely on an auth state listener instead
+      navigation.navigate('Home');
     } catch (err) {
       setLoading(false);
       switch (err.code) {
@@ -50,7 +58,9 @@ const Login = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardAvoid}>
         <ScrollView contentContainerStyle={styles.scrollView}>
+          {/* Optional title */}
           {/* <Text style={styles.title}>Login</Text> */}
+
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <TextInput 
@@ -71,7 +81,7 @@ const Login = ({ navigation }) => {
           />
 
           <TouchableOpacity 
-            style={styles.loginButton} 
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
             onPress={handleLogin}
             disabled={loading}
           >
@@ -108,8 +118,7 @@ const styles = StyleSheet.create({
     borderRadius: 10, 
     padding: 15, 
     alignItems: 'center', 
-    marginTop: 10,
-    opacity: 1,
+    marginTop: 10
   },
   loginButtonDisabled: {
     opacity: 0.6,

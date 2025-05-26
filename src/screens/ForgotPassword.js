@@ -3,7 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity, SafeAreaView,
   KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Alert
 } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { getApp } from '@react-native-firebase/app';
+import {
+  getAuth,
+  sendPasswordResetEmail
+} from '@react-native-firebase/auth';
 
 const ForgotPassword = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -18,14 +22,25 @@ const ForgotPassword = ({ navigation }) => {
     setLoading(true);
 
     try {
-      await auth().sendPasswordResetEmail(email);
+      const app = getApp();
+      const auth = getAuth(app);
+
+      await sendPasswordResetEmail(auth, email);
+
       Alert.alert(
         'Email Sent',
         'A password reset link has been sent to your email address',
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     } catch (err) {
-      Alert.alert('Error', err.message);
+      console.error(err);
+      let message = 'An error occurred. Please try again.';
+      if (err.code === 'auth/invalid-email') {
+        message = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/user-not-found') {
+        message = 'No user found with this email address.';
+      }
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }
@@ -48,7 +63,7 @@ const ForgotPassword = ({ navigation }) => {
           />
 
           <TouchableOpacity 
-            style={styles.button} 
+            style={[styles.button, loading && { opacity: 0.6 }]} 
             onPress={handleResetPassword}
             disabled={loading}
           >

@@ -4,7 +4,12 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import auth from '@react-native-firebase/auth';
+import { getApp } from '@react-native-firebase/app';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  updateProfile
+} from '@react-native-firebase/auth';
 
 const Signup = ({ navigation }) => {
   const [fullName, setFullName] = useState('');
@@ -16,7 +21,7 @@ const Signup = ({ navigation }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-   const handleSignup = async () => {
+  const handleSignup = async () => {
     if (!fullName || !email || !password || !confirmPassword) {
       setError('Please fill out all fields');
       return;
@@ -36,16 +41,16 @@ const Signup = ({ navigation }) => {
     setError('');
 
     try {
-      const userCredential = await auth().createUserWithEmailAndPassword(email, password);
-      await userCredential.user.updateProfile({
-        displayName: fullName
-      });
+      const app = getApp(); // Get the default Firebase app
+      const auth = getAuth(app); // Get the auth instance
+
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCredential.user, { displayName: fullName });
+
       Alert.alert(
         'Account Created',
         'Your account has been created successfully!',
-        [{ text: 'OK',
-          onPress: () => navigation.navigate('Login')
-         }]
+        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
       );
     } catch (err) {
       setLoading(false);
@@ -73,29 +78,29 @@ const Signup = ({ navigation }) => {
           <Text style={styles.title}>Create an account</Text>
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          <TextInput 
-            style={styles.input} 
-            placeholder="Full Name" 
-            onChangeText={setFullName} 
-            value={fullName} 
+          <TextInput
+            style={styles.input}
+            placeholder="Full Name"
+            onChangeText={setFullName}
+            value={fullName}
           />
 
-          <TextInput 
-            style={styles.input} 
-            placeholder="Email" 
-            keyboardType="email-address" 
-            autoCapitalize="none" 
-            onChangeText={setEmail} 
-            value={email} 
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            onChangeText={setEmail}
+            value={email}
           />
 
           <View style={styles.passwordContainer}>
-            <TextInput 
-              style={styles.passwordInput} 
-              placeholder="Password" 
-              secureTextEntry={!showPassword} 
-              onChangeText={setPassword} 
-              value={password} 
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Password"
+              secureTextEntry={!showPassword}
+              onChangeText={setPassword}
+              value={password}
             />
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
               <Icon name={showPassword ? 'eye' : 'eye-off'} size={20} color="#999" />
@@ -103,20 +108,20 @@ const Signup = ({ navigation }) => {
           </View>
 
           <View style={styles.passwordContainer}>
-            <TextInput 
-              style={styles.passwordInput} 
-              placeholder="Confirm Password" 
-              secureTextEntry={!showConfirmPassword} 
-              onChangeText={setConfirmPassword} 
-              value={confirmPassword} 
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Confirm Password"
+              secureTextEntry={!showConfirmPassword}
+              onChangeText={setConfirmPassword}
+              value={confirmPassword}
             />
             <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
               <Icon name={showConfirmPassword ? 'eye' : 'eye-off'} size={20} color="#999" />
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.registerButton, loading && styles.registerButtonDisabled]} 
+          <TouchableOpacity
+            style={[styles.registerButton, loading && styles.registerButtonDisabled]}
             onPress={handleSignup}
             disabled={loading}
           >
@@ -139,7 +144,13 @@ const styles = StyleSheet.create({
   keyboardAvoid: { flex: 1 },
   scrollView: { padding: 20 },
   title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginVertical: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 10, padding: 12, marginBottom: 10 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10
+  },
   passwordContainer: {
     flexDirection: 'row',
     borderWidth: 1,
@@ -147,7 +158,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     paddingHorizontal: 10,
-    marginBottom: 10,
+    marginBottom: 10
   },
   passwordInput: { flex: 1, padding: 10 },
   errorText: { color: 'red', fontSize: 12, marginBottom: 10 },
@@ -156,13 +167,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 15,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 10
   },
-  registerButtonDisabled: {
-    opacity: 0.6,
-  },
+  registerButtonDisabled: { opacity: 0.6 },
   registerButtonText: { color: 'white', fontWeight: '600' },
-  linkText: { color: '#007BFF', textAlign: 'center', marginTop: 15 },
+  linkText: { color: '#007BFF', textAlign: 'center', marginTop: 15 }
 });
 
 export default Signup;
