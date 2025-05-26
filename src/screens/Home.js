@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import PostItem from '../components/Post';
+import CommentModal from '../components/CommentModel';
 
 const posts = [
   {
@@ -11,6 +12,8 @@ const posts = [
     timeAgo: '5h ago',
     content: 'Loving the vibes here 😊',
     image: require('../assets/Posts/Post2.jpg'),
+    likes: 24,
+    comments: 3,
   },
   {
     id: '2',
@@ -19,6 +22,8 @@ const posts = [
     timeAgo: '5h ago',
     content: 'Loving the vibes here 😊',
     image: require('../assets/Posts/Post3.jpg'),
+    likes: 18,
+    comments: 7,
   },
   {
     id: '3',
@@ -27,6 +32,8 @@ const posts = [
     timeAgo: '5h ago',
     content: 'Loving the vibes here 😊',
     image: require('../assets/Posts/Post1.jpg'),
+    likes: 42,
+    comments: 12,
   },
   {
     id: '4',
@@ -35,10 +42,16 @@ const posts = [
     timeAgo: '1d ago',
     content: 'Desert adventures are always the best!',
     image: require('../assets/Posts/Post4.jpg'),
+    likes: 67,
+    comments: 5,
   },
 ];
 
 const Home = ({ navigation }) => {
+  const [commentModalVisible, setCommentModalVisible] = useState(false);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [commentCount, setCommentCount] = useState(0);
+
   const handleAuthorPress = (post) => {
     navigation.navigate('Profile', {
       profile: {
@@ -63,6 +76,17 @@ const Home = ({ navigation }) => {
     });
   };
 
+  const handleCommentPress = (post, currentCommentCount, setCurrentCommentCount) => {
+    setSelectedPost(post);
+    setCommentCount(currentCommentCount);
+    setCommentModalVisible(true);
+  };
+
+  const handleCloseCommentModal = () => {
+    setCommentModalVisible(false);
+    setSelectedPost(null);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -80,10 +104,22 @@ const Home = ({ navigation }) => {
         data={posts}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <PostItem post={item} onAuthorPress={handleAuthorPress} />
+          <PostItem 
+            post={item} 
+            onAuthorPress={handleAuthorPress}
+            onCommentPress={handleCommentPress}
+          />
         )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+      />
+
+      <CommentModal
+        visible={commentModalVisible}
+        onClose={handleCloseCommentModal}
+        post={selectedPost}
+        commentCount={commentCount}
+        setCommentCount={setCommentCount}
       />
     </SafeAreaView>
   );
