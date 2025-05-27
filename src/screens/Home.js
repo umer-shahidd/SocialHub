@@ -1,84 +1,58 @@
-import React, { useState } from 'react';
-import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity } from 'react-native';
+// src/screens/Home.js
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useDispatch, useSelector } from 'react-redux';
+
+import { startPostsListener } from '../store/postSlice';
+import PostForm from '../components/PostForm';        // ⬅️ new composer
 import PostItem from '../components/Post';
 import CommentModal from '../components/CommentModel';
 
-const posts = [
-  {
-    id: '1',
-    author: 'Emma Wilson',
-    avatar: require('../assets/Avatar/Woman.jpg'),
-    timeAgo: '5h ago',
-    content: 'Loving the vibes here 😊',
-    image: require('../assets/Posts/Post2.jpg'),
-    likes: 24,
-    comments: 3,
-  },
-  {
-    id: '2',
-    author: 'Robert Smith',
-    avatar: require('../assets/Avatar/Man.jpg'),
-    timeAgo: '5h ago',
-    content: 'Loving the vibes here 😊',
-    image: require('../assets/Posts/Post3.jpg'),
-    likes: 18,
-    comments: 7,
-  },
-  {
-    id: '3',
-    author: 'Ellie Brown',
-    avatar: require('../assets/Avatar/Man.jpg'),
-    timeAgo: '5h ago',
-    content: 'Loving the vibes here 😊',
-    image: require('../assets/Posts/Post1.jpg'),
-    likes: 42,
-    comments: 12,
-  },
-  {
-    id: '4',
-    author: 'Jane Doe',
-    avatar: require('../assets/Avatar/Man.jpg'),
-    timeAgo: '1d ago',
-    content: 'Desert adventures are always the best!',
-    image: require('../assets/Posts/Post4.jpg'),
-    likes: 67,
-    comments: 5,
-  },
-];
-
 const Home = ({ navigation }) => {
-  const [commentModalVisible, setCommentModalVisible] = useState(false);
-  const [selectedPost, setSelectedPost] = useState(null);
-  const [commentCount, setCommentCount] = useState(0);
+  const dispatch = useDispatch();
 
-  const handleAuthorPress = (post) => {
+  /** 🔗 live post list from Redux */
+  const posts = useSelector(state => state.posts.items);
+
+  /** local UI state (modal) */
+  const [commentModalVisible, setCommentModalVisible] = useState(false);
+  const [selectedPost,        setSelectedPost]        = useState(null);
+  const [commentCount,        setCommentCount]        = useState(0);
+
+  /** 🔔 start / stop Firestore realtime listener */
+  useEffect(() => {
+    let unsubscribe;                   // keep the cleanup fn
+    dispatch(startPostsListener())
+      .unwrap()                        // returns payload (unsubscribe fn)
+      .then(unsub => { unsubscribe = unsub; });
+
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, [dispatch]);
+
+  /* ——— navigation helpers ——— */
+  const handleAuthorPress = post => {
     navigation.navigate('Profile', {
       profile: {
-        name: post.author,
-        profileImage: post.avatar,
-        bio: 'Traveler | Content Creator',
+        name        : post.author,
+        profileImage: post.avatar ? { uri: post.avatar } : null,
+        bio         : 'Traveler | Content Creator',
       },
     });
   };
 
-  const handleMyProfilePress = () => {
-    navigation.navigate('UserProfile', {
-      screen: 'UserProfile',
-      params: {
-        profile: {
-          name: 'Jane Doe',
-          profileImage: require('../assets/Avatar/Man.jpg'),
-          bio: 'Digital creator | Travel enthusiast',
-          email: 'jane.doe@example.com',
-        },
-      },
-    });
-  };
+  const handleMyProfilePress = () => navigation.navigate('UserProfile');
 
-  const handleCommentPress = (post, currentCommentCount, setCurrentCommentCount) => {
+  const handleCommentPress = post => {
     setSelectedPost(post);
-    setCommentCount(currentCommentCount);
+    setCommentCount(post.comments ? post.comments.length : 0);
     setCommentModalVisible(true);
   };
 
@@ -87,25 +61,31 @@ const Home = ({ navigation }) => {
     setSelectedPost(null);
   };
 
+  /* ——— UI ——— */
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerSpacer} />
         <Text style={styles.headerTitle}>Home</Text>
         <TouchableOpacity onPress={handleMyProfilePress}>
-          <Image 
-            source={require('../assets/Avatar/Woman.jpg')} 
-            style={styles.avatar} 
+          <Image
+            source={require('../assets/Avatar/Woman.jpg')}
+            style={styles.avatar}
           />
         </TouchableOpacity>
       </View>
 
+      {/* New-post composer */}
+      <PostForm />
+
+      {/* Feed */}
       <FlatList
         data={posts}
-        keyExtractor={(item) => item.id}
+        keyExtractor={item => item.id}
         renderItem={({ item }) => (
-          <PostItem 
-            post={item} 
+          <PostItem
+            post={item}
             onAuthorPress={handleAuthorPress}
             onCommentPress={handleCommentPress}
           />
@@ -114,6 +94,7 @@ const Home = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
       />
 
+      {/* Comment modal */}
       <CommentModal
         visible={commentModalVisible}
         onClose={handleCloseCommentModal}
@@ -125,6 +106,7 @@ const Home = ({ navigation }) => {
   );
 };
 
+/* ——— styles ——— */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -140,9 +122,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  headerSpacer: {
-    width: 36, // Same as avatar width for balance
-  },
+  headerSpacer: { width: 36 },    // balance for centred title
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
