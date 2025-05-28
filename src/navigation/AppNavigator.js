@@ -8,6 +8,7 @@ import UserProfile from '../screens/UserProfile';
 import Profile from '../screens/Profile';
 import Setting from '../screens/Setting';
 import ForgotPassword from '../screens/ForgotPassword';
+import CreatePost from '../screens/createPost';
 
 
 const Stack = createNativeStackNavigator();
@@ -24,6 +25,7 @@ const AppNavigator = () => {
        <Stack.Screen name="UserProfile" component={UserProfile} />
         <Stack.Screen name="Profile" component={Profile} />
         <Stack.Screen name="Setting" component={Setting} />
+        <Stack.Screen name="CreatePost" component={CreatePost} />
 
       <Stack.Screen name="Home" component={BottomTabNavigator} />
     </Stack.Navigator>

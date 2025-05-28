@@ -7,43 +7,37 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
+  StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-
 import { startPostsListener } from '../store/postSlice';
-import PostForm from '../components/PostForm';        // ⬅️ new composer
-import PostItem from '../components/Post';
+import Post from '../components/Post';
 import CommentModal from '../components/CommentModel';
+import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 
 const Home = ({ navigation }) => {
   const dispatch = useDispatch();
-
-  /** 🔗 live post list from Redux */
   const posts = useSelector(state => state.posts.items);
 
-  /** local UI state (modal) */
   const [commentModalVisible, setCommentModalVisible] = useState(false);
-  const [selectedPost,        setSelectedPost]        = useState(null);
-  const [commentCount,        setCommentCount]        = useState(0);
+  const [selectedPost, setSelectedPost] = useState(null);
+  const [commentCount, setCommentCount] = useState(0);
 
-  /** 🔔 start / stop Firestore realtime listener */
   useEffect(() => {
-    let unsubscribe;                   // keep the cleanup fn
+    let unsubscribe;
     dispatch(startPostsListener())
-      .unwrap()                        // returns payload (unsubscribe fn)
+      .unwrap()
       .then(unsub => { unsubscribe = unsub; });
-
     return () => { if (unsubscribe) unsubscribe(); };
   }, [dispatch]);
 
-  /* ——— navigation helpers ——— */
   const handleAuthorPress = post => {
     navigation.navigate('Profile', {
       profile: {
-        name        : post.author,
+        name: post.author,
         profileImage: post.avatar ? { uri: post.avatar } : null,
-        bio         : 'Traveler | Content Creator',
+        bio: 'Traveler | Content Creator',
       },
     });
   };
@@ -61,14 +55,19 @@ const Home = ({ navigation }) => {
     setSelectedPost(null);
   };
 
-  /* ——— UI ——— */
+  const handleLikePress = post => {
+    console.log('Like pressed for post:', post.id);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
       <View style={styles.header}>
-        <View style={styles.headerSpacer} />
-        <Text style={styles.headerTitle}>Home</Text>
-        <TouchableOpacity onPress={handleMyProfilePress}>
+        <TouchableOpacity style={styles.headerIconContainer}>
+          <FontAwesome5 name="bars" size={20} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>SocialHub</Text>
+        <TouchableOpacity onPress={handleMyProfilePress} style={styles.headerRight}>
           <Image
             source={require('../assets/Avatar/Woman.jpg')}
             style={styles.avatar}
@@ -76,25 +75,21 @@ const Home = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      {/* New-post composer */}
-      <PostForm />
-
-      {/* Feed */}
       <FlatList
         data={posts}
         keyExtractor={item => item.id}
         renderItem={({ item }) => (
-          <PostItem
+          <Post
             post={item}
             onAuthorPress={handleAuthorPress}
             onCommentPress={handleCommentPress}
+            onLikePress={handleLikePress}
           />
         )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Comment modal */}
       <CommentModal
         visible={commentModalVisible}
         onClose={handleCloseCommentModal}
@@ -106,7 +101,6 @@ const Home = ({ navigation }) => {
   );
 };
 
-/* ——— styles ——— */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -122,13 +116,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  headerSpacer: { width: 36 },    // balance for centred title
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    textAlign: 'center',
-    color: '#000',
+  headerIconContainer: {
+    padding: 5,
   },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  headerRight: {},
   avatar: {
     width: 36,
     height: 36,

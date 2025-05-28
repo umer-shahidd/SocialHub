@@ -1,312 +1,217 @@
-import React, { useState, useRef, useEffect } from 'react';
+// src/components/CommentModel.js (Note: assuming file is named CommentModel.js based on previous context)
+import React, { useState, useEffect } from 'react';
 import {
+  Modal,
   View,
   Text,
-  Modal,
-  StyleSheet,
-  TouchableOpacity,
   TextInput,
+  TouchableOpacity,
   FlatList,
+  StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Image,
-  Animated,
+  Dimensions,
 } from 'react-native';
-import { X, Send } from 'react-native-feather';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { useDispatch } from 'react-redux';
+import { addCommentToPost } from '../store/postSlice'; // Import addCommentToPost
 
-const CommentModal = ({ 
-  visible, 
-  onClose, 
-  post, 
-  commentCount, 
-  setCommentCount 
-}) => {
-  const [comments, setComments] = useState([
-    {
-      id: '1',
-      author: 'Alice Johnson',
-      avatar: require('../assets/Avatar/Woman.jpg'),
-      content: 'Great photo! Love the vibes 🔥',
-      timeAgo: '2h ago',
-    },
-    {
-      id: '2',
-      author: 'Mike Chen',
-      avatar: require('../assets/Avatar/Man.jpg'),
-      content: 'This looks amazing! Where was this taken?',
-      timeAgo: '1h ago',
-    },
-  ]);
-  
-  const [newComment, setNewComment] = useState('');
-  const [slideAnim] = useState(new Animated.Value(0));
-  const textInputRef = useRef(null);
+const { height } = Dimensions.get('window');
 
+const CommentModal = ({ visible, onClose, post }) => {
+  const [commentText, setCommentText] = useState('');
+  const dispatch = useDispatch();
+
+  // Reset comment text when modal opens/closes
   useEffect(() => {
-    if (visible) {
-      Animated.timing(slideAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-      // Focus the text input when modal opens
-      setTimeout(() => {
-        textInputRef.current?.focus();
-      }, 300);
-    } else {
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+    if (!visible) {
+      setCommentText('');
     }
   }, [visible]);
 
-  const handleAddComment = () => {
-    if (newComment.trim()) {
-      const comment = {
-        id: Date.now().toString(),
-        author: 'You',
-        avatar: require('../assets/Avatar/Woman.jpg'), // User's avatar
-        content: newComment.trim(),
-        timeAgo: 'now',
-      };
-      
-      setComments([comment, ...comments]);
-      setCommentCount(commentCount + 1);
-      setNewComment('');
+  const handlePostComment = async () => {
+    if (!commentText.trim() || !post || !post.id) {
+      return;
+    }
+    try {
+      await dispatch(addCommentToPost({ postId: post.id, commentText: commentText.trim() })).unwrap();
+      setCommentText('');
+      // The Redux listener in Home.js should automatically update the post data
+      // which will re-render the comments in this modal if it's still open.
+    } catch (error) {
+      console.error('Failed to add comment:', error);
+      // Handle error, e.g., show an alert
     }
   };
 
-  const renderComment = ({ item }) => (
+  const renderCommentItem = ({ item }) => (
     <View style={styles.commentItem}>
-      <Image source={item.avatar} style={styles.commentAvatar} />
+      <Icon name="person-pin" size={24} color="#666" style={styles.commentAvatar} />
       <View style={styles.commentContent}>
-        <View style={styles.commentHeader}>
-          <Text style={styles.commentAuthor}>{item.author}</Text>
-          <Text style={styles.commentTime}>{item.timeAgo}</Text>
-        </View>
-        <Text style={styles.commentText}>{item.content}</Text>
+        <Text style={styles.commentAuthor}>{item.author || 'Anonymous'}</Text>
+        <Text style={styles.commentText}>{item.text}</Text>
+        <Text style={styles.commentTimestamp}>{item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}</Text>
       </View>
     </View>
   );
 
   return (
     <Modal
-      visible={visible}
-      animationType="fade"
+      animationType="slide"
       transparent={true}
+      visible={visible}
       onRequestClose={onClose}
     >
-      <View style={styles.modalOverlay}>
-        <Animated.View 
-          style={[
-            styles.modalContainer,
-            {
-              transform: [{
-                translateY: slideAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [600, 0],
-                })
-              }]
-            }
-          ]}
-        >
-          <KeyboardAvoidingView 
-            style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            {/* Header */}
-            <View style={styles.header}>
-              <Text style={styles.headerTitle}>Comments</Text>
-              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <X stroke="#333" width={24} height={24} />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardAvoidingView}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Comments ({post?.comments?.length || 0})</Text>
+              <TouchableOpacity onPress={onClose}>
+                <Icon name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
 
-            {/* Post Preview */}
-            <View style={styles.postPreview}>
-              <Image source={post?.avatar} style={styles.postAuthorAvatar} />
-              <View style={styles.postInfo}>
-                <Text style={styles.postAuthor}>{post?.author}</Text>
-                <Text style={styles.postContent} numberOfLines={2}>
-                  {post?.content}
-                </Text>
-              </View>
-            </View>
-
-            {/* Comments List */}
             <FlatList
-              data={comments}
+              data={post?.comments || []}
               keyExtractor={(item) => item.id}
-              renderItem={renderComment}
-              style={styles.commentsList}
+              renderItem={renderCommentItem}
+              contentContainerStyle={styles.commentsList}
               showsVerticalScrollIndicator={false}
-              inverted={false}
+              ListEmptyComponent={
+                <Text style={styles.noCommentsText}>No comments yet. Be the first!</Text>
+              }
             />
 
-            {/* Comment Input */}
-            <View style={styles.inputContainer}>
-              <Image 
-                source={require('../assets/Avatar/Woman.jpg')} 
-                style={styles.inputAvatar} 
-              />
+            <View style={styles.commentInputContainer}>
               <TextInput
-                ref={textInputRef}
-                style={styles.textInput}
+                style={styles.commentInput}
                 placeholder="Add a comment..."
-                value={newComment}
-                onChangeText={setNewComment}
-                multiline={true}
-                maxLength={500}
+                placeholderTextColor="#999"
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
               />
-              <TouchableOpacity 
-                onPress={handleAddComment}
-                style={[
-                  styles.sendButton,
-                  { opacity: newComment.trim() ? 1 : 0.5 }
-                ]}
-                disabled={!newComment.trim()}
+              <TouchableOpacity
+                style={[styles.postCommentButton, { opacity: commentText.trim() ? 1 : 0.5 }]}
+                onPress={handlePostComment}
+                disabled={!commentText.trim()}
               >
-                <Send stroke="#007AFF" width={20} height={20} />
+                <Icon name="send" size={24} color="#fff" />
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-        </Animated.View>
-      </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  modalContainer: {
+  modalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '90%',
-    minHeight: '60%',
+    paddingTop: 10,
+    maxHeight: height * 0.8, // Adjust height as needed
+    flex: 1, // Allow content to expand
   },
-  container: {
-    flex: 1,
-  },
-  header: {
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 15,
+    paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#eee',
   },
-  headerTitle: {
+  modalTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: 'bold',
     color: '#333',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  postPreview: {
-    flexDirection: 'row',
-    padding: 15,
-    backgroundColor: '#f8f8f8',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  postAuthorAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 10,
-  },
-  postInfo: {
-    flex: 1,
-  },
-  postAuthor: {
-    fontWeight: '600',
-    fontSize: 14,
-    color: '#333',
-  },
-  postContent: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
   },
   commentsList: {
-    flex: 1,
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    flexGrow: 1, // Allow FlatList to grow
   },
   commentItem: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
+    marginBottom: 15,
+    alignItems: 'flex-start',
   },
   commentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
     marginRight: 10,
+    borderRadius: 12, // Simple placeholder for avatar
+    backgroundColor: '#e0e0e0',
+    padding: 2,
   },
   commentContent: {
     flex: 1,
   },
-  commentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
   commentAuthor: {
-    fontWeight: '600',
+    fontWeight: 'bold',
     fontSize: 14,
     color: '#333',
-    marginRight: 8,
-  },
-  commentTime: {
-    fontSize: 12,
-    color: '#888',
+    marginBottom: 2,
   },
   commentText: {
     fontSize: 14,
-    color: '#333',
-    lineHeight: 18,
+    color: '#555',
+    lineHeight: 20,
   },
-  inputContainer: {
+  commentTimestamp: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 4,
+  },
+  noCommentsText: {
+    textAlign: 'center',
+    marginTop: 20,
+    color: '#666',
+    fontSize: 14,
+  },
+  commentInputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    borderTopColor: '#eee',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    backgroundColor: '#f9f9f9',
   },
-  inputAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 10,
-    marginBottom: 5,
-  },
-  textInput: {
+  commentInput: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    minHeight: 40,
+    maxHeight: 100, // Limit height for multiline
+    backgroundColor: '#fff',
     borderRadius: 20,
     paddingHorizontal: 15,
-    paddingVertical: 10,
-    maxHeight: 100,
-    fontSize: 14,
-    backgroundColor: '#f8f8f8',
+    paddingTop: 10, // Adjust for multiline
+    paddingBottom: 10, // Adjust for multiline
+    fontSize: 15,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
   },
-  sendButton: {
-    marginLeft: 10,
-    padding: 8,
-    marginBottom: 5,
+  postCommentButton: {
+    backgroundColor: '#1E90FF',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

@@ -1,102 +1,56 @@
-import React, { useState } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, Animated } from 'react-native';
-import Icon from 'react-native-vector-icons/Feather'; // ✅ Use Feather icons from react-native-vector-icons
-import { Audio } from 'expo-av';
+// src/components/Post.js
+import React from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import FontAwesome5 from 'react-native-vector-icons/FontAwesome5'; // For icons
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons'; // For comment icon
 
-const PostItem = ({ post, onAuthorPress, onCommentPress }) => {
-  const [isLiked, setIsLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(post.likes || 0);
-  const [commentCount, setCommentCount] = useState(post.comments || 0);
-  const [scaleAnim] = useState(new Animated.Value(1));
-
-  const playLikeSound = async () => {
-    try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav' },
-        { shouldPlay: true }
-      );
-      await sound.playAsync();
-    } catch (error) {
-      console.log('Error playing sound:', error);
-    }
-  };
-
-  const handleLikePress = async () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 1.2,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    setIsLiked(!isLiked);
-    setLikeCount(isLiked ? likeCount - 1 : likeCount + 1);
-
-    if (!isLiked) {
-      await playLikeSound();
-    }
-  };
-
-  const handleCommentPress = () => {
-    onCommentPress?.(post, commentCount, setCommentCount);
-  };
-
+const Post = ({ post, onAuthorPress, onCommentPress, onLikePress }) => {
   return (
     <View style={styles.postContainer}>
+      {/* Post Header */}
       <View style={styles.postHeader}>
-        <TouchableOpacity
-          style={styles.authorContainer}
-          onPress={() => onAuthorPress?.(post)}
-        >
-          <Image source={post.avatar} style={styles.avatar} />
+        <TouchableOpacity onPress={() => onAuthorPress(post)} style={styles.authorInfo}>
+          <Image
+            source={post.avatar ? { uri: post.avatar } : require('../assets/Avatar/Woman.jpg')} // Fallback avatar
+            style={styles.avatar}
+          />
           <View>
-            <Text style={styles.authorName}>{post.author}</Text>
-            <Text style={styles.timeAgo}>{post.timeAgo}</Text>
+            <Text style={styles.authorName}>{post.author || 'Anonymous User'}</Text>
+            <Text style={styles.postTime}>{post.time || 'Just now'}</Text>
           </View>
         </TouchableOpacity>
-
         <TouchableOpacity>
-          <Icon name="more-horizontal" size={24} color="#555" />
+          <MaterialCommunityIcons name="dots-horizontal" size={24} color="#666" />
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.content}>{post.content}</Text>
-      <Image source={post.image} style={styles.postImage} />
+      {/* Post Content - Caption */}
+      {post.content && <Text style={styles.postCaption}>{post.content}</Text>}
 
-      {/* Like and Comment Section */}
-      <View style={styles.actionContainer}>
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleLikePress}
-          activeOpacity={0.7}
-        >
-          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-            <Icon
-              name="heart"
-              size={20}
-              color={isLiked ? "#ff4757" : "#555"}
-              solid={isLiked}
-            />
-          </Animated.View>
-          <Text style={[styles.actionText, isLiked && styles.likedText]}>
-            {likeCount}
-          </Text>
-        </TouchableOpacity>
+      {/* Post Image */}
+      {post.image && post.image.uri && (
+        <Image source={{ uri: post.image.uri }} style={styles.postImage} resizeMode="cover" />
+      )}
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleCommentPress}
-          activeOpacity={0.7}
-        >
-          <Icon name="message-circle" size={20} color="#555" />
-          <Text style={styles.actionText}>{commentCount}</Text>
-        </TouchableOpacity>
+      {/* Post Footer - Stats and Actions */}
+      <View style={styles.postFooter}>
+        <View style={styles.postStats}>
+          <Text style={styles.statText}>{post.likes || 0} Likes</Text>
+          <Text style={styles.statText}>{post.comments ? post.comments.length : 0} Comments</Text>
+        </View>
+
+        <View style={styles.postActions}>
+          <TouchableOpacity onPress={() => onLikePress(post)} style={styles.actionButton}>
+            <FontAwesome5 name="heart" size={20} color={post.liked ? '#ff0000' : '#666'} solid={post.liked} />
+            <Text style={styles.actionText}>Like</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => onCommentPress(post)} style={styles.actionButton}>
+            <MaterialCommunityIcons name="comment-text-multiple-outline" size={22} color="#666" />
+            <Text style={styles.actionText}>Comment</Text>
+          </TouchableOpacity>
+          {/* Share and Save icons removed as requested */}
+        </View>
       </View>
     </View>
   );
@@ -105,64 +59,78 @@ const PostItem = ({ post, onAuthorPress, onCommentPress }) => {
 const styles = StyleSheet.create({
   postContainer: {
     backgroundColor: '#fff',
-    marginBottom: 15,
-    padding: 15,
     borderRadius: 10,
-    marginHorizontal: 15,
+    marginVertical: 8,
+    marginHorizontal: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   postHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
     alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
   },
-  authorContainer: {
+  authorInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     marginRight: 10,
   },
   authorName: {
-    fontWeight: '600',
-    fontSize: 15,
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#333',
   },
-  timeAgo: {
+  postTime: {
     fontSize: 12,
     color: '#888',
   },
-  content: {
-    fontSize: 16,
-    marginBottom: 10,
+  postCaption: {
+    fontSize: 15,
     color: '#333',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   postImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 10,
-    marginBottom: 12,
+    height: 250,
+    marginBottom: 8,
   },
-  actionContainer: {
+  postFooter: {
+    padding: 12,
+  },
+  postStats: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 8,
+  },
+  statText: {
+    fontSize: 13,
+    color: '#555',
+  },
+  postActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
     paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 20,
     paddingVertical: 5,
+    paddingHorizontal: 10,
   },
   actionText: {
     marginLeft: 6,
@@ -170,9 +138,6 @@ const styles = StyleSheet.create({
     color: '#555',
     fontWeight: '500',
   },
-  likedText: {
-    color: '#ff4757',
-  },
 });
 
-export default PostItem;
+export default Post;
