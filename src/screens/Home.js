@@ -1,5 +1,4 @@
-// src/screens/Home.js
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,135 +6,806 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
-  StatusBar
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useDispatch, useSelector } from 'react-redux';
-import { startPostsListener } from '../store/postSlice';
-import Post from '../components/Post';
-import CommentModal from '../components/CommentModel';
-import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
+import { useIsFocused } from '@react-navigation/native';
+import FontAwesome from 'react-native-vector-icons/FontAwesome';
+import auth from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
+import storage from '@react-native-firebase/storage';
 
 const Home = ({ navigation }) => {
-  const dispatch = useDispatch();
-  const posts = useSelector(state => state.posts.items);
-
+  const [posts, setPosts] = useState([]);
+  const [user, setUser] = useState(null);
   const [commentModalVisible, setCommentModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
-  const [commentCount, setCommentCount] = useState(0);
+  const [newComment, setNewComment] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [comments, setComments] = useState([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState(null);
+  const [followLoading, setFollowLoading] = useState({});
+  const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const isFocused = useIsFocused();
 
   useEffect(() => {
-    let unsubscribe;
-    dispatch(startPostsListener())
-      .unwrap()
-      .then(unsub => { unsubscribe = unsub; });
-    return () => { if (unsubscribe) unsubscribe(); };
-  }, [dispatch]);
-
-  const handleAuthorPress = post => {
-    navigation.navigate('Profile', {
-      profile: {
-        name: post.author,
-        profileImage: post.avatar ? { uri: post.avatar } : null,
-        bio: 'Traveler | Content Creator',
-      },
+    const unsubscribeAuth = auth().onAuthStateChanged(async currentUser => {
+      try {
+        if (currentUser) {
+          setUser(currentUser);
+          const userDoc = await firestore().collection('users').doc(currentUser.uid).get();
+          if (userDoc.exists) {
+            setCurrentUserProfile(userDoc.data());
+          }
+        }
+      } catch (err) {
+        console.error('Auth state error:', err);
+        setError('Failed to load user data');
+      }
     });
+    return unsubscribeAuth;
+  }, []);
+
+  useEffect(() => {
+    if (!user || !isFocused) return;
+    
+    // Real-time posts listener
+    const postsQuery = firestore()
+      .collection('posts')
+      .orderBy('timestamp', 'desc');
+    
+    const unsubscribePosts = postsQuery.onSnapshot(
+      async (snapshot) => {
+        try {
+          setLoading(true);
+          setError(null);
+          
+          // Process all document changes
+          const newPosts = [];
+          const removedIds = [];
+          
+          snapshot.docChanges().forEach(change => {
+            try {
+              if (change.type === 'removed') {
+                removedIds.push(change.doc.id);
+              } else if (change.type === 'added' || change.type === 'modified') {
+                const data = change.doc.data();
+                
+                // Validate required fields
+                if (!data.userId || !data.timestamp) {
+                  console.warn('Invalid post data:', data);
+                  return;
+                }
+                
+                newPosts.push({
+                  id: change.doc.id,
+                  ...data,
+                  timestamp: data.timestamp?.toDate?.(),
+                });
+              }
+            } catch (changeErr) {
+              console.error('Change processing error:', changeErr);
+            }
+          });
+
+          // Process removed posts
+          if (removedIds.length > 0) {
+            setPosts(prev => prev.filter(p => !removedIds.includes(p.id)));
+          }
+
+          if (newPosts.length === 0) {
+            setLoading(false);
+            return;
+          }
+
+          // Get user IDs for new posts
+          const userIds = [...new Set(newPosts.map(post => post.userId))];
+          const usersMap = await fetchUsersByIds(userIds);
+
+          // Get current user's likes and follows
+          const [likedSnapshot, followsSnapshot] = await Promise.all([
+            firestore().collection('likes')
+              .where('userId', '==', user.uid)
+              .get()
+              .catch(err => {
+                console.error('Likes query error:', err);
+                return { docs: [] };
+              }),
+            firestore().collection('follows')
+              .where('followerId', '==', user.uid)
+              .get()
+              .catch(err => {
+                console.error('Follows query error:', err);
+                return { docs: [] };
+              })
+          ]);
+
+          const likedIds = new Set(likedSnapshot.docs.map(doc => doc.data().postId));
+          const followingIds = new Set(followsSnapshot.docs.map(doc => doc.data().followingId));
+
+          // Enrich post data
+          const enrichedPosts = newPosts.map(post => {
+            const userInfo = usersMap[post.userId] || {};
+            return {
+              ...post,
+              author: userInfo.username || 'Unknown',
+              avatar: userInfo.avatarUrl ? { uri: userInfo.avatarUrl } : null,
+              likedByUser: likedIds.has(post.id),
+              isFollowing: followingIds.has(post.userId)
+            };
+          });
+
+          // Update state
+          setPosts(prev => {
+            // Create a map of existing posts for quick lookup
+            const existingPostsMap = new Map(prev.map(p => [p.id, p]));
+            
+            // Merge new posts with existing ones
+            const mergedPosts = enrichedPosts.map(newPost => {
+              const existingPost = existingPostsMap.get(newPost.id);
+              // Preserve local state if exists
+              return existingPost ? { ...existingPost, ...newPost } : newPost;
+            });
+            
+            // Add any existing posts not in the new data
+            const remainingPosts = prev.filter(p => 
+              !enrichedPosts.some(np => np.id === p.id)
+            );
+            
+            return [...mergedPosts, ...remainingPosts].sort(
+              (a, b) => b.timestamp - a.timestamp
+            );
+          });
+        } catch (err) {
+          console.error('Snapshot processing error:', err);
+          setError('Failed to load posts');
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      },
+      (firestoreError) => {
+        console.error('Firestore listener error:', firestoreError);
+        setError('Connection error. Please check your network.');
+        setLoading(false);
+        setRefreshing(false);
+      }
+    );
+
+    return () => {
+      if (unsubscribePosts) unsubscribePosts();
+    };
+  }, [user, isFocused]);
+
+  const fetchUsersByIds = async (userIds) => {
+    const users = {};
+    if (!userIds || userIds.length === 0) return users;
+    
+    try {
+      const batchSize = 10;
+      for (let i = 0; i < userIds.length; i += batchSize) {
+        const batch = userIds.slice(i, i + batchSize);
+        const snapshot = await firestore()
+          .collection('users')
+          .where(firestore.FieldPath.documentId(), 'in', batch)
+          .get();
+
+        snapshot.forEach(doc => {
+          if (doc.exists) {
+            users[doc.id] = doc.data();
+          }
+        });
+      }
+    } catch (err) {
+      console.error('User fetch error:', err);
+    }
+    return users;
   };
 
-  const handleMyProfilePress = () => navigation.navigate('UserProfile');
-
-  const handleCommentPress = post => {
-    setSelectedPost(post);
-    setCommentCount(post.comments ? post.comments.length : 0);
-    setCommentModalVisible(true);
+  const refreshPosts = async () => {
+    try {
+      setRefreshing(true);
+      setError(null);
+      
+      // Force a refresh by resetting the listener
+      if (user) {
+        // This will trigger the onSnapshot listener again
+        // We don't need to do anything extra as the listener will handle it
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+      setError('Failed to refresh posts');
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  const handleCloseCommentModal = () => {
-    setCommentModalVisible(false);
-    setSelectedPost(null);
+  const handleLikePress = async (postId) => {
+    if (!user || !postId) return;
+    
+    try {
+      // Optimistic UI update
+      setPosts(prev => 
+        prev.map(post => 
+          post.id === postId ? {
+            ...post,
+            likedByUser: !post.likedByUser,
+            likes: post.likedByUser ? (post.likes || 0) - 1 : (post.likes || 0) + 1
+          } : post
+        )
+      );
+
+      const likeQuery = await firestore()
+        .collection('likes')
+        .where('postId', '==', postId)
+        .where('userId', '==', user.uid)
+        .get();
+
+      if (likeQuery.empty) {
+        await firestore().collection('likes').add({
+          postId,
+          userId: user.uid,
+          timestamp: firestore.FieldValue.serverTimestamp()
+        });
+        await firestore().collection('posts').doc(postId).update({
+          likes: firestore.FieldValue.increment(1)
+        });
+      } else {
+        likeQuery.forEach(async (doc) => await doc.ref.delete());
+        await firestore().collection('posts').doc(postId).update({
+          likes: firestore.FieldValue.increment(-1)
+        });
+      }
+    } catch (err) {
+      console.error('Like error:', err);
+      // Revert optimistic update on error
+      setPosts(prev => 
+        prev.map(post => 
+          post.id === postId ? {
+            ...post,
+            likedByUser: !post.likedByUser,
+            likes: post.likedByUser ? (post.likes || 0) + 1 : (post.likes || 0) - 1
+          } : post
+        )
+      );
+    }
   };
 
-  const handleLikePress = post => {
-    console.log('Like pressed for post:', post.id);
+  const fetchComments = async (postId) => {
+    if (!postId) return;
+    
+    try {
+      const snapshot = await firestore()
+        .collection('comments')
+        .where('postId', '==', postId)
+        .orderBy('timestamp', 'asc')
+        .get();
+
+      const commentData = await Promise.all(
+        snapshot.docs.map(async docSnap => {
+          const data = docSnap.data();
+          try {
+            const userSnap = await firestore().collection('users').doc(data.userId).get();
+            return {
+              id: docSnap.id,
+              ...data,
+              timestamp: data.timestamp?.toDate?.(),
+              author: userSnap.exists ? userSnap.data()?.username || 'Unknown' : 'Deleted User'
+            };
+          } catch (userErr) {
+            console.error('User fetch error:', userErr);
+            return {
+              id: docSnap.id,
+              ...data,
+              timestamp: data.timestamp?.toDate?.(),
+              author: 'Unknown'
+            };
+          }
+        })
+      );
+      setComments(commentData);
+    } catch (err) {
+      console.error('Comments error:', err);
+    }
   };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim() || !selectedPost || !user) return;
+
+    try {
+      // Optimistic UI update
+      const tempComment = {
+        id: `temp-${Date.now()}`,
+        text: newComment,
+        author: currentUserProfile?.username || 'You',
+        userId: user.uid,
+        timestamp: new Date()
+      };
+      
+      setComments(prev => [...prev, tempComment]);
+      setNewComment('');
+      
+      // Actual Firestore operation
+      await firestore().collection('comments').add({
+        postId: selectedPost.id,
+        userId: user.uid,
+        text: newComment,
+        timestamp: firestore.FieldValue.serverTimestamp()
+      });
+
+      await firestore().collection('posts').doc(selectedPost.id).update({
+        commentsCount: firestore.FieldValue.increment(1)
+      });
+
+      // Refresh comments to get actual data
+      fetchComments(selectedPost.id);
+    } catch (err) {
+      console.error('Comment error:', err);
+      // Revert optimistic update
+      setComments(prev => prev.filter(c => c.id !== tempComment.id));
+      setNewComment(tempComment.text);
+    }
+  };
+
+  const handleDeletePost = async (postId) => {
+    if (!postId) return;
+    
+    try {
+      // Optimistic removal
+      setPosts(prev => prev.filter(p => p.id !== postId));
+      
+      const postRef = firestore().collection('posts').doc(postId);
+      const postDoc = await postRef.get();
+      
+      if (!postDoc.exists) return;
+      
+      const postData = postDoc.data();
+      await postRef.delete();
+
+      // Delete image if exists
+      if (postData?.imageUrl) {
+        try {
+          const imagePath = decodeURIComponent(postData.imageUrl.split('/o/')[1].split('?')[0]);
+          const imageRef = storage().ref(imagePath);
+          await imageRef.delete();
+        } catch (storageErr) {
+          console.error('Image delete error:', storageErr);
+        }
+      }
+
+      // Delete related likes & comments
+      const batch = firestore().batch();
+
+      try {
+        const likes = await firestore()
+          .collection('likes')
+          .where('postId', '==', postId)
+          .get();
+        likes.forEach(doc => batch.delete(doc.ref));
+      } catch (likesErr) {
+        console.error('Likes delete error:', likesErr);
+      }
+
+      try {
+        const comments = await firestore()
+          .collection('comments')
+          .where('postId', '==', postId)
+          .get();
+        comments.forEach(doc => batch.delete(doc.ref));
+      } catch (commentsErr) {
+        console.error('Comments delete error:', commentsErr);
+      }
+
+      await batch.commit();
+    } catch (err) {
+      console.error('Post delete error:', err);
+      setError('Failed to delete post');
+      // Revert optimistic removal
+      if (selectedPost) {
+        setPosts(prev => [...prev, selectedPost]);
+      }
+    }
+  };
+
+  const handleFollow = async (targetUserId) => {
+    if (!user || user.uid === targetUserId || !targetUserId) return;
+
+    try {
+      setFollowLoading(prev => ({ ...prev, [targetUserId]: true }));
+
+      const followQuery = await firestore()
+        .collection('follows')
+        .where('followerId', '==', user.uid)
+        .where('followingId', '==', targetUserId)
+        .get();
+
+      if (followQuery.empty) {
+        await firestore().collection('follows').add({
+          followerId: user.uid,
+          followingId: targetUserId,
+          timestamp: firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Optimistic update
+        setPosts(prev => 
+          prev.map(post => 
+            post.userId === targetUserId ? { ...post, isFollowing: true } : post
+          )
+        );
+      } else {
+        followQuery.forEach(async doc => await doc.ref.delete());
+        
+        // Optimistic update
+        setPosts(prev => 
+          prev.map(post => 
+            post.userId === targetUserId ? { ...post, isFollowing: false } : post
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Follow error:', err);
+    } finally {
+      setFollowLoading(prev => ({ ...prev, [targetUserId]: false }));
+    }
+  };
+
+  const renderPostItem = ({ item }) => (
+    <View style={styles.postCard}>
+      <TouchableOpacity onPress={() => navigation.navigate('Profile', { userId: item.userId })}>
+        <View style={styles.postHeader}>
+          {item.avatar ? (
+            <Image source={item.avatar} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <FontAwesome name="user" size={20} color="#666" />
+            </View>
+          )}
+          <View style={styles.userInfo}>
+            <Text style={styles.username}>{item.author}</Text>
+            <Text style={styles.timestamp}>
+              {item.timestamp?.toLocaleString?.() || 'Unknown date'}
+            </Text>
+          </View>
+          {user?.uid !== item.userId && (
+            <TouchableOpacity 
+              onPress={() => handleFollow(item.userId)}
+              disabled={followLoading[item.userId]}
+              style={[
+                styles.followButton,
+                item.isFollowing && styles.followingButton
+              ]}
+            >
+              <Text style={styles.followButtonText}>
+                {item.isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </TouchableOpacity>
+
+      <Text style={styles.caption}>{item.content}</Text>
+
+      {item.imageUrl && (
+        <Image source={{ uri: item.imageUrl }} style={styles.postImage} resizeMode="cover" />
+      )}
+
+      <View style={styles.postActions}>
+        <TouchableOpacity 
+          onPress={() => handleLikePress(item.id)} 
+          style={styles.actionButton}
+        >
+          <FontAwesome
+            name={item.likedByUser ? 'heart' : 'heart-o'}
+            size={20}
+            color={item.likedByUser ? 'red' : '#333'}
+          />
+          <Text style={styles.actionText}>{item.likes || 0}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          onPress={() => {
+            setSelectedPost(item);
+            setCommentModalVisible(true);
+            fetchComments(item.id);
+          }}
+          style={styles.actionButton}
+        >
+          <FontAwesome name="comment-o" size={20} color="#333" />
+          <Text style={styles.actionText}>{item.commentsCount || 0}</Text>
+        </TouchableOpacity>
+
+        {user?.uid === item.userId && (
+          <TouchableOpacity 
+            onPress={() => handleDeletePost(item.id)}
+            style={styles.actionButton}
+          >
+            <FontAwesome name="trash" size={20} color="#D11A2A" />
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F3F4F6" />
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.headerIconContainer}>
-          <FontAwesome5 name="bars" size={20} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>SocialHub</Text>
-        <TouchableOpacity onPress={handleMyProfilePress} style={styles.headerRight}>
-          <Image
-            source={require('../assets/Avatar/Woman.jpg')}
-            style={styles.avatar}
-          />
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.container}>
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity onPress={refreshPosts}>
+            <Text style={styles.retryText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      
+      {loading && !refreshing ? (
+        <ActivityIndicator size="large" style={{ marginTop: 100 }} />
+      ) : posts.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No posts yet</Text>
+          <Text style={styles.emptySubtext}>Create your first post or follow users</Text>
+          <TouchableOpacity onPress={refreshPosts} style={styles.refreshButton}>
+            <FontAwesome name="refresh" size={20} color="#4A90E2" />
+            <Text style={styles.refreshText}>Refresh</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={posts}
+          renderItem={renderPostItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={{ padding: 10 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshPosts}
+              colors={['#4A90E2']}
+            />
+          }
+        />
+      )}
 
-      <FlatList
-        data={posts}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <Post
-            post={item}
-            onAuthorPress={handleAuthorPress}
-            onCommentPress={handleCommentPress}
-            onLikePress={handleLikePress}
+      <Modal visible={commentModalVisible} animationType="slide">
+        <View style={{ flex: 1, padding: 16 }}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Comments</Text>
+            <TouchableOpacity onPress={() => setCommentModalVisible(false)}>
+              <FontAwesome name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+          
+          <FlatList
+            data={comments}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <View style={styles.commentItem}>
+                <View style={styles.commentHeader}>
+                  <Text style={styles.commentAuthor}>{item.author}</Text>
+                  <Text style={styles.commentTime}>
+                    {item.timestamp?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || 'Just now'}
+                  </Text>
+                </View>
+                <Text style={styles.commentText}>{item.text}</Text>
+              </View>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.noComments}>No comments yet</Text>
+            }
+            contentContainerStyle={{ flexGrow: 1 }}
           />
-        )}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
-
-      <CommentModal
-        visible={commentModalVisible}
-        onClose={handleCloseCommentModal}
-        post={selectedPost}
-        commentCount={commentCount}
-        setCommentCount={setCommentCount}
-      />
+          
+          <View style={styles.commentInputContainer}>
+            <TextInput
+              style={styles.messageInput}
+              placeholder="Write a comment..."
+              value={newComment}
+              onChangeText={setNewComment}
+              editable={!!user}
+            />
+            <TouchableOpacity 
+              onPress={handleAddComment} 
+              style={[
+                styles.sendButton,
+                !newComment.trim() && styles.disabledButton
+              ]}
+              disabled={!newComment.trim() || !user}
+            >
+              <Text style={{ color: 'white', textAlign: 'center' }}>Post</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F3F4F6',
+  container: { flex: 1, backgroundColor: '#fff' },
+  errorContainer: {
+    backgroundColor: '#ffebee',
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  header: {
+  errorText: {
+    color: '#b71c1c',
+    textAlign: 'center',
+  },
+  retryText: {
+    color: '#4A90E2',
+    fontWeight: 'bold',
+    marginTop: 5,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10
+  },
+  emptySubtext: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+  },
+  refreshText: {
+    color: '#4A90E2',
+    marginLeft: 5,
+    fontWeight: 'bold'
+  },
+  postCard: { 
+    backgroundColor: '#f9f9f9', 
+    padding: 12, 
+    marginVertical: 6, 
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  },
+  postHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 8 
+  },
+  userInfo: {
+    flex: 1,
+  },
+  avatar: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    marginRight: 10 
+  },
+  avatarPlaceholder: {
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: '#ddd',
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginRight: 10
+  },
+  username: { 
+    fontWeight: 'bold', 
+    fontSize: 16 
+  },
+  timestamp: { 
+    fontSize: 12, 
+    color: '#777' 
+  },
+  caption: { 
+    fontSize: 14, 
+    marginVertical: 6 
+  },
+  postImage: { 
+    width: '100%', 
+    height: 200, 
+    borderRadius: 8, 
+    marginVertical: 8 
+  },
+  postActions: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    marginTop: 10 
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4
+  },
+  actionText: {
+    fontSize: 14,
+    marginLeft: 4
+  },
+  messageInput: { 
+    borderWidth: 1, 
+    borderColor: '#ccc', 
+    padding: 10, 
+    borderRadius: 20,
+    flex: 1
+  },
+  sendButton: { 
+    backgroundColor: '#4A90E2', 
+    padding: 10, 
+    borderRadius: 20,
+    marginLeft: 8,
+    minWidth: 60
+  },
+  disabledButton: {
+    backgroundColor: '#cccccc'
+  },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#F3F4F6',
+    paddingBottom: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#eee'
   },
-  headerIconContainer: {
-    padding: 5,
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold'
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#222',
+  commentItem: {
+    backgroundColor: '#f0f0f0',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8
   },
-  headerRight: {},
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+  commentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4
   },
-  listContent: {
-    paddingBottom: 80,
-    paddingTop: 8,
+  commentAuthor: {
+    fontWeight: 'bold'
   },
+  commentTime: {
+    fontSize: 12,
+    color: '#666'
+  },
+  commentText: {
+    fontSize: 14
+  },
+  noComments: {
+    textAlign: 'center',
+    marginTop: 20,
+    fontSize: 16,
+    color: '#666'
+  },
+  commentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 10
+  },
+  followButton: {
+    backgroundColor: '#e0e0e0',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 15
+  },
+  followingButton: {
+    backgroundColor: '#4A90E2'
+  },
+  followButtonText: {
+    color: '#333',
+    fontSize: 14
+  }
 });
 
 export default Home;

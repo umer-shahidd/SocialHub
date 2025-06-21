@@ -15,6 +15,9 @@ import {
 import Icon from "react-native-vector-icons/Feather"
 import { getApp } from "@react-native-firebase/app"
 import { getAuth, signInWithEmailAndPassword } from "@react-native-firebase/auth"
+import { useDispatch } from "react-redux";
+import { setUser } from "../store/authSlice"; // adjust the path based on your folder structure
+
 
 const Login = ({ navigation }) => {
   const [email, setEmail] = useState("")
@@ -22,6 +25,7 @@ const Login = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const dispatch = useDispatch();
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -37,7 +41,17 @@ const Login = ({ navigation }) => {
       const auth = getAuth(app)
 
       await signInWithEmailAndPassword(auth, email, password)
-      navigation.navigate("Home")
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+const user = userCredential.user;
+
+dispatch(setUser({
+  userId: user.uid,
+  userName: user.displayName || "User",
+  userEmail: user.email,
+  userAvatar: user.photoURL || "", // optional
+}));
+
+navigation.navigate("Home");
     } catch (err) {
       setLoading(false)
       switch (err.code) {

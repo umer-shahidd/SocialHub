@@ -1,49 +1,66 @@
-// src/store/postSlice.js
+// Updated postSlice.js with correct Firebase SDK usage and comments
+
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import firestore from '@react-native-firebase/firestore';
-import storage from '@react-native-firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { v4 as uuidv4 } from 'uuid';
+import firestore from '@react-native-firebase/firestore'; // ✅ React Native Firebase SDK
+import storage from '@react-native-firebase/storage'; // ✅ React Native Firebase Storage
+import { arrayUnion } from 'firebase/firestore'; // Only needed for Firestore field array updates
 
 export const addNewPost = createAsyncThunk(
   'posts/addNewPost',
-  async ({ content, image }, { getState }) => {
-    const userId = getState().auth.userId;
-    const userName = getState().auth.userName || 'Guest User';
-    const userAvatar = getState().auth.userAvatar || '';
+  async ({ content, image }, { getState, rejectWithValue }) => {
+    try {
+      const state = getState();
+      const userId = state.auth?.userId;
 
-    let imageUrl = '';
-    if (image && image.uri) {
-      const filename = image.name || `${uuidv4()}-${new Date().getTime()}.jpg`;
-      const storageRef = storage().ref(`post_images/${filename}`);
-      await storageRef.putFile(image.uri);
-      imageUrl = await storageRef.getDownloadURL();
+      if (!userId) {
+        throw new Error('User not authenticated');
+      }
+
+      const userName = state.auth?.userName || 'Guest User';
+      const userAvatar = state.auth?.userAvatar || '';
+
+      let imageUrl = '';
+      if (image && image.uri) {
+        const filename = image.name || `${uuidv4()}-${new Date().getTime()}.jpg`;
+        const storageRef = ref(storage(), `post_images/${filename}`);
+        await uploadBytes(storageRef, image.uri);
+        imageUrl = await getDownloadURL(storageRef);
+      }
+
+      // ✅ Correct way to create a new document reference in React Native Firebase
+      const newPostRef = firestore().collection('posts').doc();
+
+      const newPost = {
+        id: newPostRef.id,
+        authorId: userId,
+        author: userName,
+        avatar: userAvatar,
+        content,
+        image: imageUrl ? { uri: imageUrl } : null,
+        likes: 0,
+        comments: [],
+        liked: false,
+        time: new Date().toISOString(),
+      };
+
+      await newPostRef.set(newPost); // ✅ Correct way to add document
+      return newPost;
+    } catch (error) {
+      return rejectWithValue(error.message);
     }
-
-    const newPost = {
-      id: firestore().collection('posts').doc().id,
-      authorId: userId,
-      author: userName,
-      avatar: userAvatar,
-      content,
-      image: imageUrl ? { uri: imageUrl } : null,
-      likes: 0,
-      comments: [],
-      liked: false,
-      time: new Date().toISOString(),
-    };
-
-    await firestore().collection('posts').doc(newPost.id).set(newPost);
-    return newPost;
   }
 );
 
 export const toggleLike = createAsyncThunk(
   'posts/toggleLike',
   async (postId, { getState }) => {
-    const postRef = firestore().collection('posts').doc(postId);
-    const postDoc = await postRef.get();
-    const currentLikes = postDoc.data()?.likes || 0;
-    const currentLikedStatus = postDoc.data()?.liked || false;
+    const postRef = firestore().collection('posts').doc(postId); // ✅ Fixed doc reference
+    const postDoc = await postRef.get(); // ✅ get() instead of getDoc
+    const postData = postDoc.data();
+    const currentLikes = postData?.likes || 0;
+    const currentLikedStatus = postData?.liked || false;
 
     const newLikedStatus = !currentLikedStatus;
     const newLikes = newLikedStatus ? currentLikes + 1 : Math.max(0, currentLikes - 1);
@@ -70,9 +87,9 @@ export const addCommentToPost = createAsyncThunk(
       timestamp: new Date().toISOString(),
     };
 
-    const postRef = firestore().collection('posts').doc(postId);
+    const postRef = firestore().collection('posts').doc(postId); // ✅
     await postRef.update({
-      comments: firestore.FieldValue.arrayUnion(comment),
+      comments: firestore.FieldValue.arrayUnion(comment), // ✅ React Native Firebase compatible
     });
 
     return { postId, comment };
@@ -85,6 +102,9 @@ export const postSlice = createSlice({
     items: [],
     status: 'idle',
     error: null,
+    userId: null,
+    userName: null,
+    userAvatar: null,
   },
   reducers: {
     postsReceived: (state, action) => {
@@ -149,19 +169,24 @@ export const { postsReceived, postLikedToggled, commentAdded } = postSlice.actio
 export const startPostsListener = createAsyncThunk(
   'posts/startPostsListener',
   async (_, { dispatch }) => {
-    const unsubscribe = firestore().collection('posts')
+    const unsubscribe = firestore()
+      .collection('posts')
       .orderBy('time', 'desc')
-      .onSnapshot(querySnapshot => {
-        const posts = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          comments: doc.data().comments || [],
-          likes: doc.data().likes || 0,
-        }));
-        dispatch(postsReceived(posts));
-      }, error => {
-        console.error("Error listening to posts:", error);
-      });
+      .onSnapshot(
+        (querySnapshot) => {
+          const posts = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            comments: doc.data().comments || [],
+            likes: doc.data().likes || 0,
+          }));
+          dispatch(postsReceived(posts));
+        },
+        (error) => {
+          console.error('Error listening to posts:', error);
+        }
+      );
+
     return unsubscribe;
   }
 );

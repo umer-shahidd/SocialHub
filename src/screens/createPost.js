@@ -1,332 +1,204 @@
-// src/screens/createPost.js
-import React, { useState } from 'react';
+import React, {useState} from 'react';
 import {
   View,
+  Text,
   TextInput,
   TouchableOpacity,
-  Text,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   Image,
-  ScrollView,
-  Dimensions,
-  Platform,
-  SafeAreaView,
-  StatusBar,
-  KeyboardAvoidingView, 
 } from 'react-native';
-import { useDispatch } from 'react-redux';
-import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
-import Icon from 'react-native-vector-icons/MaterialIcons';
-import { addNewPost } from '../store/postSlice'; 
+import Icon from 'react-native-vector-icons/FontAwesome';
+import {launchImageLibrary} from 'react-native-image-picker';
+import { Platform } from 'react-native';
 
-const { width } = Dimensions.get('window');
 
-const CreatePost = ({ navigation }) => {
-  const [text, setText] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(null);
-  const dispatch = useDispatch();
+import firestore from '@react-native-firebase/firestore';
 
-  const handleImagePicker = () => {
-    Alert.alert(
-      'Select Image',
-      'Choose an option',
-      [
-        { text: 'Camera', onPress: openCamera },
-        { text: 'Gallery', onPress: openGallery },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-      { cancelable: true }
-    );
-  };
+// ✅ Use correct RNFirebase instances
+import {
+  authInstance,
+  firestoreInstance,
+  storageInstance,
+} from '../services/firebase';
 
-  const openCamera = () => {
-    const options = {
-      mediaType: 'photo',
-      quality: 0.8,
-      maxWidth: 1024,
-      maxHeight: 1024,
-    };
-    launchCamera(options, (response) => {
-      if (response.didCancel) {
-        console.log('User cancelled camera picker');
-      } else if (response.errorCode) {
-        console.log('Camera Error: ', response.errorMessage);
-        Alert.alert('Error', 'Failed to open camera.');
-      } else if (response.assets && response.assets[0]) {
-        setSelectedImage(response.assets[0]);
-      }
-    });
-  };
+const CreatePost = ({navigation}) => {
+  const [content, setContent] = useState('');
+  const [image, setImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
 
-  const openGallery = () => {
-    const options = {
-      mediaType: 'photo',
-      quality: 0.8,
-      maxWidth: 1024,
-      maxHeight: 1024,
-    };
-    launchImageLibrary(options, (response) => {
-      if (response.didCancel) {
-        console.log('User cancelled image picker');
-      } else if (response.errorCode) {
-        console.log('Gallery Error: ', response.errorMessage);
-        Alert.alert('Error', 'Failed to open gallery.');
-      } else if (response.assets && response.assets[0]) {
-        setSelectedImage(response.assets[0]);
-      }
-    });
-  };
-
-  const removeImage = () => {
-    setSelectedImage(null);
-  };
-
-  const submitPost = async () => {
-    if ((!text.trim() && !selectedImage) || loading) {
-      Alert.alert('Validation', 'Please enter some text or select an image to post.');
-      return;
-    }
-
-    setLoading(true);
-    const postData = {
-      content: text.trim(),
-      image: selectedImage ? {
-        uri: selectedImage.uri,
-        type: selectedImage.type,
-        name: selectedImage.fileName || 'image.jpg',
-      } : null,
-      
-    };
-
+  const pickImage = async () => {
     try {
-      await dispatch(addNewPost(postData)).unwrap();
-      setText('');
-      setSelectedImage(null);
-      Alert.alert('Success', 'Post created successfully!');
-      navigation.navigate('Home');
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.8,
+        selectionLimit: 1,
+      });
+
+      if (!result.didCancel && result.assets?.length) {
+        setImage(result.assets[0].uri);
+      }
     } catch (err) {
-      console.error('Post creation error:', err);
-      Alert.alert('Error', 'Could not create post. Please try again.');
-    } finally {
-      setLoading(false);
+      setError('Failed to select image');
+      console.error(err);
     }
   };
 
-  const isPostValid = (text.trim().length > 0 || selectedImage) && !loading;
+const getFileExtension = (uri) => {
+  const match = uri.match(/\.(\w+)(\?.*)?$/);
+  return match ? match[1] : 'jpg'; // Fallback to jpg
+};
+
+const handlePost = async () => {
+  if (!content.trim() && !image) {
+    setError('Please add content or select an image');
+    return;
+  }
+
+  setUploading(true);
+  setError('');
+
+  try {
+    let imageUrl = null;
+
+   if (image) {
+  try {
+    const fileExt = image.split('.').pop().split('?')[0] || 'jpg';
+    const fileName = `post_${Date.now()}.${fileExt}`;
+    const storagePath = `posts/${authInstance.currentUser.uid}/${fileName}`;
+    const storageRef = storageInstance.ref(storagePath);
+
+    console.log('Uploading image:', image);
+    console.log('Storage path:', storagePath);
+
+    // Upload file
+    await storageRef.putFile(image);
+
+    // Now get download URL
+    const downloadURL = await storageRef.getDownloadURL();
+    console.log('Image uploaded. URL:', downloadURL);
+
+    imageUrl = downloadURL;
+  } catch (uploadError) {
+    console.error('Image upload failed:', uploadError);
+    setError('Image upload failed. Try again.');
+    setUploading(false);
+    return;
+  }
+}
+
+
+    // Upload post content to Firestore
+    await firestoreInstance.collection('posts').add({
+      userId: authInstance.currentUser.uid,
+      content: content.trim(),
+      imageUrl,
+      likes: 0,
+      commentsCount: 0,
+      timestamp: firestore.FieldValue.serverTimestamp(),
+    });
+
+    navigation.goBack();
+  } catch (err) {
+    console.error('Error creating post:', err);
+    setError('Failed to create post. Please try again.');
+  } finally {
+    setUploading(false);
+  }
+};
+
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => navigation.goBack()}>
-              <Icon name="close" size={24} color="#666" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Create Post</Text>
-            <TouchableOpacity
-              style={[styles.postButton, { opacity: isPostValid ? 1 : 0.5 }]}
-              onPress={submitPost}
-              disabled={!isPostValid}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.postButtonText}>Post</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Icon name="times" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Create Post</Text>
+        <TouchableOpacity onPress={handlePost} disabled={uploading}>
+          {uploading ? (
+            <ActivityIndicator color="#4A90E2" />
+          ) : (
+            <Text style={styles.postButton}>Post</Text>
+          )}
+        </TouchableOpacity>
+      </View>
 
-          <ScrollView style={styles.content} contentContainerStyle={styles.contentPadding} showsVerticalScrollIndicator={false}>
-            {/* Input Section */}
-            <View style={styles.inputSection}>
-              <View style={styles.avatarContainer}>
-                <View style={styles.avatar}>
-                  <Icon name="person" size={24} color="#666" />
-                </View>
-              </View>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  placeholder="What's on your mind?"
-                  placeholderTextColor="#999"
-                  value={text}
-                  onChangeText={setText}
-                  multiline
-                  style={styles.textInput}
-                  textAlignVertical="top"
-                  maxLength={500}
-                />
-                <Text style={styles.characterCount}>
-                  {text.length}/500
-                </Text>
-              </View>
-            </View>
+      <TextInput
+        style={styles.input}
+        placeholder="What's on your mind?"
+        multiline
+        value={content}
+        onChangeText={setContent}
+      />
 
-            {/* Image Preview */}
-            {selectedImage && (
-              <View style={styles.imagePreviewContainer}>
-                <Image source={{ uri: selectedImage.uri }} style={styles.imagePreview} />
-                <TouchableOpacity style={styles.removeImageButton} onPress={removeImage}>
-                  <Icon name="close" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            )}
+      {image && (
+        <Image
+          source={{uri: image}}
+          style={styles.previewImage}
+          resizeMode="cover"
+        />
+      )}
 
-            {/* Action Buttons */}
-            <View style={styles.actionsContainer}>
-              <TouchableOpacity style={styles.actionButton} onPress={handleImagePicker}>
-                <Icon name="photo-camera" size={24} color="#1E90FF" />
-                <Text style={styles.actionText}>Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton}>
-                <Icon name="location-on" size={24} color="#1E90FF" />
-                <Text style={styles.actionText}>Location</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton}>
-                <Icon name="mood" size={24} color="#1E90FF" />
-                <Text style={styles.actionText}>Feeling</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.iconButton} onPress={pickImage}>
+          <Icon name="image" size={24} color="#4A90E2" />
+          <Text>Photo</Text>
+        </TouchableOpacity>
+      </View>
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
   container: {
     flex: 1,
     backgroundColor: '#fff',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    alignItems: 'center',
+    padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#e1e8ed',
-    backgroundColor: '#fff',
+    borderBottomColor: '#eee',
   },
-  cancelButton: {
-    padding: 8,
-  },
-  headerTitle: {
+  title: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: 'bold',
   },
   postButton: {
-    backgroundColor: '#1E90FF',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 60,
-    alignItems: 'center',
-    justifyContent: 'center', 
-  },
-  postButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  content: {
-    flex: 1,
-  },
-  contentPadding: {
-    paddingBottom: 30, 
-  },
-  inputSection: {
-    flexDirection: 'row',
-    padding: 16,
-    alignItems: 'flex-start',
-  },
-  avatarContainer: {
-    marginRight: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inputContainer: {
-    flex: 1,
-  },
-  textInput: {
-    fontSize: 18,
-    lineHeight: 24,
-    color: '#333',
-    minHeight: 120, // Increased minHeight for more input space
-    textAlignVertical: 'top',
-    padding: 0, // Remove default padding for consistent layout
-  },
-  characterCount: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
-    marginTop: 8,
-  },
-  imagePreviewContainer: {
-    margin: 16,
-    marginTop: 0,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-    borderWidth: 1, // Add border for better visual separation
-    borderColor: '#e1e8ed',
-  },
-  imagePreview: {
-    width: '100%',
-    height: 200,
-    backgroundColor: '#f0f0f0',
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e1e8ed',
-    marginTop: 20,
-    justifyContent: 'space-around', // Distribute actions evenly
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 10, // Adjusted padding
-    // marginRight: 20, // Removed for space-around
-  },
-  actionText: {
-    marginLeft: 8,
+    color: '#4A90E2',
+    fontWeight: 'bold',
     fontSize: 16,
-    color: '#1E90FF',
-    fontWeight: '500',
+  },
+  input: {
+    padding: 15,
+    fontSize: 16,
+    minHeight: 150,
+    textAlignVertical: 'top',
+  },
+  previewImage: {
+    width: '100%',
+    height: 300,
+  },
+  footer: {
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    padding: 15,
+  },
+  iconButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  errorText: {
+    color: 'red',
+    textAlign: 'center',
+    marginTop: 10,
   },
 });
 
