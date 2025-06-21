@@ -453,39 +453,61 @@ const Home = ({ navigation }) => {
     }
   };
 
+  // Format timestamp to relative time
+  const formatTimeAgo = (date) => {
+    if (!date) return '';
+    
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) {
+      return 'Just now';
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+  };
+
   const renderPostItem = ({ item }) => (
     <View style={styles.postCard}>
-      <TouchableOpacity onPress={() => navigation.navigate('Profile', { userId: item.userId })}>
-        <View style={styles.postHeader}>
-          {item.avatar ? (
-            <Image source={item.avatar} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <FontAwesome name="user" size={20} color="#666" />
-            </View>
-          )}
-          <View style={styles.userInfo}>
-            <Text style={styles.username}>{item.author}</Text>
-            <Text style={styles.timestamp}>
-              {item.timestamp?.toLocaleString?.() || 'Unknown date'}
-            </Text>
+      <View style={styles.postHeader}>
+        {item.avatar ? (
+          <Image source={item.avatar} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <FontAwesome name="user" size={20} color="#666" />
           </View>
-          {user?.uid !== item.userId && (
-            <TouchableOpacity 
-              onPress={() => handleFollow(item.userId)}
-              disabled={followLoading[item.userId]}
-              style={[
-                styles.followButton,
-                item.isFollowing && styles.followingButton
-              ]}
-            >
-              <Text style={styles.followButtonText}>
-                {item.isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
+        )}
+        <View style={styles.userInfo}>
+          <Text style={styles.username}>{item.author}</Text>
+          <Text style={styles.timestamp}>
+            {formatTimeAgo(item.timestamp)}
+          </Text>
         </View>
-      </TouchableOpacity>
+        {user?.uid !== item.userId && (
+          <TouchableOpacity 
+            onPress={() => handleFollow(item.userId)}
+            disabled={followLoading[item.userId]}
+            style={[
+              styles.followButton,
+              item.isFollowing && styles.followingButton
+            ]}
+          >
+            <Text style={[
+              styles.followButtonText,
+              item.isFollowing && styles.followingButtonText
+            ]}>
+              {item.isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       <Text style={styles.caption}>{item.content}</Text>
 
@@ -503,7 +525,7 @@ const Home = ({ navigation }) => {
             size={20}
             color={item.likedByUser ? 'red' : '#333'}
           />
-          <Text style={styles.actionText}>{item.likes || 0}</Text>
+          <Text style={styles.actionCount}>{item.likes || 0}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -515,7 +537,12 @@ const Home = ({ navigation }) => {
           style={styles.actionButton}
         >
           <FontAwesome name="comment-o" size={20} color="#333" />
-          <Text style={styles.actionText}>{item.commentsCount || 0}</Text>
+          <Text style={styles.actionCount}>{item.commentsCount || 0}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.actionButton}>
+          <FontAwesome name="share" size={20} color="#333" />
+          <Text style={styles.actionCount}>0</Text>
         </TouchableOpacity>
 
         {user?.uid === item.userId && (
@@ -532,6 +559,24 @@ const Home = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+          {currentUserProfile?.avatarUrl ? (
+            <Image 
+              source={{ uri: currentUserProfile.avatarUrl }} 
+              style={styles.headerAvatar} 
+            />
+          ) : (
+            <View style={styles.headerAvatarPlaceholder}>
+              <FontAwesome name="user" size={20} color="#666" />
+            </View>
+          )}
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Home</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
@@ -557,7 +602,7 @@ const Home = ({ navigation }) => {
           data={posts}
           renderItem={renderPostItem}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ padding: 10 }}
+          contentContainerStyle={{ paddingBottom: 20 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -567,6 +612,14 @@ const Home = ({ navigation }) => {
           }
         />
       )}
+
+      {/* Floating Action Button */}
+      <TouchableOpacity 
+        style={styles.fab}
+        onPress={() => navigation.navigate('CreatePost')}
+      >
+        <FontAwesome name="plus" size={24} color="white" />
+      </TouchableOpacity>
 
       <Modal visible={commentModalVisible} animationType="slide">
         <View style={{ flex: 1, padding: 16 }}>
@@ -623,7 +676,40 @@ const Home = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#fff' 
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    backgroundColor: 'white',
+  },
+  headerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  headerAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#ddd',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  headerSpacer: {
+    width: 32,
+  },
   errorContainer: {
     backgroundColor: '#ffebee',
     padding: 10,
@@ -667,20 +753,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold'
   },
   postCard: { 
-    backgroundColor: '#f9f9f9', 
-    padding: 12, 
-    marginVertical: 6, 
-    borderRadius: 10,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+    backgroundColor: 'white', 
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
   },
   postHeader: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    marginBottom: 8 
+    marginBottom: 12,
   },
   userInfo: {
     flex: 1,
@@ -689,7 +770,7 @@ const styles = StyleSheet.create({
     width: 40, 
     height: 40, 
     borderRadius: 20, 
-    marginRight: 10 
+    marginRight: 12,
   },
   avatarPlaceholder: {
     width: 40, 
@@ -698,39 +779,41 @@ const styles = StyleSheet.create({
     backgroundColor: '#ddd',
     justifyContent: 'center', 
     alignItems: 'center', 
-    marginRight: 10
+    marginRight: 12,
   },
   username: { 
     fontWeight: 'bold', 
-    fontSize: 16 
+    fontSize: 16,
+    marginBottom: 2,
   },
   timestamp: { 
-    fontSize: 12, 
+    fontSize: 13, 
     color: '#777' 
   },
   caption: { 
-    fontSize: 14, 
-    marginVertical: 6 
+    fontSize: 15, 
+    marginBottom: 12,
+    lineHeight: 20,
   },
   postImage: { 
     width: '100%', 
     height: 200, 
     borderRadius: 8, 
-    marginVertical: 8 
+    marginBottom: 12,
   },
   postActions: { 
     flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    marginTop: 10 
+    justifyContent: 'flex-start',
+    gap: 24,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4
+    gap: 6,
   },
-  actionText: {
+  actionCount: {
     fontSize: 14,
-    marginLeft: 4
+    color: '#666',
   },
   messageInput: { 
     borderWidth: 1, 
@@ -795,17 +878,39 @@ const styles = StyleSheet.create({
   },
   followButton: {
     backgroundColor: '#e0e0e0',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 15
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 15,
   },
   followingButton: {
-    backgroundColor: '#4A90E2'
+    backgroundColor: '#4A90E2',
   },
   followButtonText: {
     color: '#333',
-    fontSize: 14
-  }
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  followingButtonText: {
+    color: 'white',
+  },
+  // Floating Action Button
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    backgroundColor: '#4A90E2',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    zIndex: 10,
+  },
 });
 
 export default Home;

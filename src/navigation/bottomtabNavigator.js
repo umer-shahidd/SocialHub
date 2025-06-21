@@ -50,7 +50,7 @@ const BottomTabNavigator = () => {
       <Tab.Screen name="Home" component={Home} />
 
       {/* Center Tab Button for CreatePost */}
-      <Tab.Screen
+      {/* <Tab.Screen
         name="CreatePost"
         component={CreatePost}
         options={{
@@ -67,7 +67,7 @@ const BottomTabNavigator = () => {
             </TouchableOpacity>
           ),
         }}
-      />
+      /> */}
 
       <Tab.Screen name="UserProfile" component={UserProfile} />
       <Tab.Screen name="Setting" component={Setting} />
