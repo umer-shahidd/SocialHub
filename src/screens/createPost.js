@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,10 @@ import {
   StyleSheet,
   ActivityIndicator,
   Image,
+  Alert, // Using Alert for simple user feedback as per RN best practices for Modals
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import {launchImageLibrary} from 'react-native-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { Platform } from 'react-native';
 
 
@@ -22,11 +23,50 @@ import {
   storageInstance,
 } from '../services/firebase';
 
-const CreatePost = ({navigation}) => {
+const CreatePost = ({ navigation, route }) => {
   const [content, setContent] = useState('');
-  const [image, setImage] = useState(null);
+  const [image, setImage] = useState(null); // URI of the selected/existing image
+  const [initialImageUrl, setInitialImageUrl] = useState(null); // To track original image
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [postId, setPostId] = useState(null);
+  const [isLoadingPost, setIsLoadingPost] = useState(true); // New state for loading existing post
+
+  useEffect(() => {
+    // Check if a postId is passed for editing
+    if (route.params?.postId) {
+      const id = route.params.postId;
+      setPostId(id);
+      setIsEditing(true);
+      fetchPostData(id);
+    } else {
+      setIsLoadingPost(false); // No post to load, so done loading
+    }
+  }, [route.params?.postId]);
+
+  const fetchPostData = async (id) => {
+    try {
+      const postDoc = await firestoreInstance.collection('posts').doc(id).get();
+      if (postDoc.exists) {
+        const data = postDoc.data();
+        setContent(data.content || '');
+        setImage(data.imageUrl || null);
+        setInitialImageUrl(data.imageUrl || null); // Store original image URL
+      } else {
+        setError('Post not found.');
+        Alert.alert('Error', 'Post not found.');
+        navigation.goBack();
+      }
+    } catch (err) {
+      console.error('Error fetching post for editing:', err);
+      setError('Failed to load post for editing.');
+      Alert.alert('Error', 'Failed to load post for editing.');
+      navigation.goBack();
+    } finally {
+      setIsLoadingPost(false);
+    }
+  };
 
   const pickImage = async () => {
     try {
@@ -45,69 +85,108 @@ const CreatePost = ({navigation}) => {
     }
   };
 
-const getFileExtension = (uri) => {
-  const match = uri.match(/\.(\w+)(\?.*)?$/);
-  return match ? match[1] : 'jpg'; // Fallback to jpg
-};
+  const handleRemoveImage = () => {
+    setImage(null);
+    // If we're editing and the image was originally present, it means it needs to be deleted from storage later.
+    // We'll handle the actual storage deletion during the post update if initialImageUrl is not null and image becomes null.
+  };
 
-const handlePost = async () => {
-  if (!content.trim() && !image) {
-    setError('Please add content or select an image');
-    return;
+  const handlePost = async () => {
+    if (!content.trim() && !image) {
+      setError('Please add content or select an image');
+      return;
+    }
+
+    setUploading(true);
+    setError('');
+
+    try {
+      let finalImageUrl = image; // Start with the current image state
+
+      // Handle image upload/deletion if image has changed
+      if (image !== initialImageUrl) { // Image has been changed or removed
+        // If there was an old image and it's now removed or replaced, delete the old one
+        if (initialImageUrl) {
+          try {
+            const oldImagePath = decodeURIComponent(initialImageUrl.split('/o/')[1].split('?')[0]);
+            const oldImageRef = storageInstance.ref(oldImagePath);
+            await oldImageRef.delete();
+            console.log('Old image deleted:', oldImagePath);
+          } catch (storageErr) {
+            if (storageErr.code === 'storage/object-not-found') {
+                console.warn('Old image not found in storage, might have been deleted already.');
+            } else {
+                console.error('Failed to delete old image from storage:', storageErr);
+            }
+          }
+        }
+
+        // If a new image is selected, upload it
+        if (image && image.startsWith('file://')) { // Only upload if it's a new local file URI
+          try {
+            const fileExt = image.split('.').pop().split('?')[0] || 'jpg';
+            const fileName = `post_${Date.now()}.${fileExt}`;
+            const storagePath = `posts/${authInstance.currentUser.uid}/${fileName}`;
+            const storageRef = storageInstance.ref(storagePath);
+
+            console.log('Uploading new image:', image);
+            console.log('Storage path:', storagePath);
+
+            await storageRef.putFile(image);
+            const downloadURL = await storageRef.getDownloadURL();
+            console.log('New image uploaded. URL:', downloadURL);
+            finalImageUrl = downloadURL;
+          } catch (uploadError) {
+            console.error('Image upload failed:', uploadError);
+            setError('Image upload failed. Try again.');
+            setUploading(false);
+            return;
+          }
+        } else if (image === null) {
+            finalImageUrl = null; // Image was explicitly removed by user
+        }
+      }
+
+      const postData = {
+        content: content.trim(),
+        imageUrl: finalImageUrl,
+        // likes and commentsCount should not be updated here, they are managed separately
+        timestamp: firestore.FieldValue.serverTimestamp(), // Update timestamp on edit
+      };
+
+      if (isEditing && postId) {
+        // Update existing post
+        await firestoreInstance.collection('posts').doc(postId).update(postData);
+        Alert.alert('Success', 'Post updated successfully!');
+      } else {
+        // Create new post
+        const newPostData = {
+          userId: authInstance.currentUser.uid,
+          likes: 0,
+          commentsCount: 0,
+          ...postData,
+        };
+        await firestoreInstance.collection('posts').add(newPostData);
+        Alert.alert('Success', 'Post created successfully!');
+      }
+
+      navigation.goBack();
+    } catch (err) {
+      console.error('Error creating/updating post:', err);
+      setError('Failed to save post. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (isLoadingPost) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4A90E2" />
+        <Text style={{ marginTop: 10 }}>Loading post...</Text>
+      </View>
+    );
   }
-
-  setUploading(true);
-  setError('');
-
-  try {
-    let imageUrl = null;
-
-   if (image) {
-  try {
-    const fileExt = image.split('.').pop().split('?')[0] || 'jpg';
-    const fileName = `post_${Date.now()}.${fileExt}`;
-    const storagePath = `posts/${authInstance.currentUser.uid}/${fileName}`;
-    const storageRef = storageInstance.ref(storagePath);
-
-    console.log('Uploading image:', image);
-    console.log('Storage path:', storagePath);
-
-    // Upload file
-    await storageRef.putFile(image);
-
-    // Now get download URL
-    const downloadURL = await storageRef.getDownloadURL();
-    console.log('Image uploaded. URL:', downloadURL);
-
-    imageUrl = downloadURL;
-  } catch (uploadError) {
-    console.error('Image upload failed:', uploadError);
-    setError('Image upload failed. Try again.');
-    setUploading(false);
-    return;
-  }
-}
-
-
-    // Upload post content to Firestore
-    await firestoreInstance.collection('posts').add({
-      userId: authInstance.currentUser.uid,
-      content: content.trim(),
-      imageUrl,
-      likes: 0,
-      commentsCount: 0,
-      timestamp: firestore.FieldValue.serverTimestamp(),
-    });
-
-    navigation.goBack();
-  } catch (err) {
-    console.error('Error creating post:', err);
-    setError('Failed to create post. Please try again.');
-  } finally {
-    setUploading(false);
-  }
-};
-
 
   return (
     <View style={styles.container}>
@@ -115,12 +194,12 @@ const handlePost = async () => {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="times" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.title}>Create Post</Text>
+        <Text style={styles.title}>{isEditing ? 'Edit Post' : 'Create Post'}</Text>
         <TouchableOpacity onPress={handlePost} disabled={uploading}>
           {uploading ? (
             <ActivityIndicator color="#4A90E2" />
           ) : (
-            <Text style={styles.postButton}>Post</Text>
+            <Text style={styles.postButton}>{isEditing ? 'Update' : 'Post'}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -134,11 +213,16 @@ const handlePost = async () => {
       />
 
       {image && (
-        <Image
-          source={{uri: image}}
-          style={styles.previewImage}
-          resizeMode="cover"
-        />
+        <View style={styles.imagePreviewContainer}>
+          <Image
+            source={{ uri: image }}
+            style={styles.previewImage}
+            resizeMode="cover"
+          />
+          <TouchableOpacity onPress={handleRemoveImage} style={styles.removeImageButton}>
+            <Icon name="times-circle" size={24} color="red" />
+          </TouchableOpacity>
+        </View>
       )}
 
       <View style={styles.footer}>
@@ -156,6 +240,12 @@ const handlePost = async () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#fff',
   },
   header: {
@@ -181,9 +271,24 @@ const styles = StyleSheet.create({
     minHeight: 150,
     textAlignVertical: 'top',
   },
-  previewImage: {
+  imagePreviewContainer: {
+    position: 'relative',
     width: '100%',
     height: 300,
+    marginBottom: 15,
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 2,
   },
   footer: {
     borderTopWidth: 1,

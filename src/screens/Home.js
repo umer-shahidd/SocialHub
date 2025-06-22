@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ const Home = ({ navigation }) => {
   const [followLoading, setFollowLoading] = useState({});
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(''); // State for search bar
   const isFocused = useIsFocused();
 
   useEffect(() => {
@@ -52,35 +53,35 @@ const Home = ({ navigation }) => {
 
   useEffect(() => {
     if (!user || !isFocused) return;
-    
+
     // Real-time posts listener
     const postsQuery = firestore()
       .collection('posts')
       .orderBy('timestamp', 'desc');
-    
+
     const unsubscribePosts = postsQuery.onSnapshot(
       async (snapshot) => {
         try {
           setLoading(true);
           setError(null);
-          
+
           // Process all document changes
           const newPosts = [];
           const removedIds = [];
-          
+
           snapshot.docChanges().forEach(change => {
             try {
               if (change.type === 'removed') {
                 removedIds.push(change.doc.id);
               } else if (change.type === 'added' || change.type === 'modified') {
                 const data = change.doc.data();
-                
+
                 // Validate required fields
                 if (!data.userId || !data.timestamp) {
                   console.warn('Invalid post data:', data);
                   return;
                 }
-                
+
                 newPosts.push({
                   id: change.doc.id,
                   ...data,
@@ -143,19 +144,19 @@ const Home = ({ navigation }) => {
           setPosts(prev => {
             // Create a map of existing posts for quick lookup
             const existingPostsMap = new Map(prev.map(p => [p.id, p]));
-            
+
             // Merge new posts with existing ones
             const mergedPosts = enrichedPosts.map(newPost => {
               const existingPost = existingPostsMap.get(newPost.id);
               // Preserve local state if exists
               return existingPost ? { ...existingPost, ...newPost } : newPost;
             });
-            
+
             // Add any existing posts not in the new data
-            const remainingPosts = prev.filter(p => 
+            const remainingPosts = prev.filter(p =>
               !enrichedPosts.some(np => np.id === p.id)
             );
-            
+
             return [...mergedPosts, ...remainingPosts].sort(
               (a, b) => b.timestamp - a.timestamp
             );
@@ -184,7 +185,7 @@ const Home = ({ navigation }) => {
   const fetchUsersByIds = async (userIds) => {
     const users = {};
     if (!userIds || userIds.length === 0) return users;
-    
+
     try {
       const batchSize = 10;
       for (let i = 0; i < userIds.length; i += batchSize) {
@@ -210,7 +211,7 @@ const Home = ({ navigation }) => {
     try {
       setRefreshing(true);
       setError(null);
-      
+
       // Force a refresh by resetting the listener
       if (user) {
         // This will trigger the onSnapshot listener again
@@ -226,11 +227,11 @@ const Home = ({ navigation }) => {
 
   const handleLikePress = async (postId) => {
     if (!user || !postId) return;
-    
+
     try {
       // Optimistic UI update
-      setPosts(prev => 
-        prev.map(post => 
+      setPosts(prev =>
+        prev.map(post =>
           post.id === postId ? {
             ...post,
             likedByUser: !post.likedByUser,
@@ -263,8 +264,8 @@ const Home = ({ navigation }) => {
     } catch (err) {
       console.error('Like error:', err);
       // Revert optimistic update on error
-      setPosts(prev => 
-        prev.map(post => 
+      setPosts(prev =>
+        prev.map(post =>
           post.id === postId ? {
             ...post,
             likedByUser: !post.likedByUser,
@@ -277,7 +278,7 @@ const Home = ({ navigation }) => {
 
   const fetchComments = async (postId) => {
     if (!postId) return;
-    
+
     try {
       const snapshot = await firestore()
         .collection('comments')
@@ -325,10 +326,10 @@ const Home = ({ navigation }) => {
         userId: user.uid,
         timestamp: new Date()
       };
-      
+
       setComments(prev => [...prev, tempComment]);
       setNewComment('');
-      
+
       // Actual Firestore operation
       await firestore().collection('comments').add({
         postId: selectedPost.id,
@@ -353,16 +354,16 @@ const Home = ({ navigation }) => {
 
   const handleDeletePost = async (postId) => {
     if (!postId) return;
-    
+
     try {
       // Optimistic removal
       setPosts(prev => prev.filter(p => p.id !== postId));
-      
+
       const postRef = firestore().collection('posts').doc(postId);
       const postDoc = await postRef.get();
-      
+
       if (!postDoc.exists) return;
-      
+
       const postData = postDoc.data();
       await postRef.delete();
 
@@ -429,19 +430,19 @@ const Home = ({ navigation }) => {
           followingId: targetUserId,
           timestamp: firestore.FieldValue.serverTimestamp()
         });
-        
+
         // Optimistic update
-        setPosts(prev => 
-          prev.map(post => 
+        setPosts(prev =>
+          prev.map(post =>
             post.userId === targetUserId ? { ...post, isFollowing: true } : post
           )
         );
       } else {
         followQuery.forEach(async doc => await doc.ref.delete());
-        
+
         // Optimistic update
-        setPosts(prev => 
-          prev.map(post => 
+        setPosts(prev =>
+          prev.map(post =>
             post.userId === targetUserId ? { ...post, isFollowing: false } : post
           )
         );
@@ -456,10 +457,10 @@ const Home = ({ navigation }) => {
   // Format timestamp to relative time
   const formatTimeAgo = (date) => {
     if (!date) return '';
-    
+
     const now = new Date();
     const diffInSeconds = Math.floor((now - date) / 1000);
-    
+
     if (diffInSeconds < 60) {
       return 'Just now';
     } else if (diffInSeconds < 3600) {
@@ -473,6 +474,18 @@ const Home = ({ navigation }) => {
       return `${days} day${days > 1 ? 's' : ''} ago`;
     }
   };
+
+  // Memoize filtered posts for efficient re-renders
+  const filteredPosts = useMemo(() => {
+    if (!searchQuery) {
+      return posts;
+    }
+    const lowerCaseQuery = searchQuery.toLowerCase();
+    return posts.filter(post =>
+      post.author && post.author.toLowerCase().includes(lowerCaseQuery)
+    );
+  }, [posts, searchQuery]);
+
 
   const renderPostItem = ({ item }) => (
     <View style={styles.postCard}>
@@ -491,7 +504,7 @@ const Home = ({ navigation }) => {
           </Text>
         </View>
         {user?.uid !== item.userId && (
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => handleFollow(item.userId)}
             disabled={followLoading[item.userId]}
             style={[
@@ -516,8 +529,8 @@ const Home = ({ navigation }) => {
       )}
 
       <View style={styles.postActions}>
-        <TouchableOpacity 
-          onPress={() => handleLikePress(item.id)} 
+        <TouchableOpacity
+          onPress={() => handleLikePress(item.id)}
           style={styles.actionButton}
         >
           <FontAwesome
@@ -528,7 +541,7 @@ const Home = ({ navigation }) => {
           <Text style={styles.actionCount}>{item.likes || 0}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => {
             setSelectedPost(item);
             setCommentModalVisible(true);
@@ -546,12 +559,22 @@ const Home = ({ navigation }) => {
         </TouchableOpacity>
 
         {user?.uid === item.userId && (
-          <TouchableOpacity 
-            onPress={() => handleDeletePost(item.id)}
-            style={styles.actionButton}
-          >
-            <FontAwesome name="trash" size={20} color="#D11A2A" />
-          </TouchableOpacity>
+          <>
+            {/* Edit Button */}
+            <TouchableOpacity
+              onPress={() => navigation.navigate('CreatePost', { postId: item.id })}
+              style={styles.actionButton}
+            >
+              <FontAwesome name="pencil" size={20} color="#4A90E2" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleDeletePost(item.id)}
+              style={styles.actionButton}
+            >
+              <FontAwesome name="trash" size={20} color="#D11A2A" />
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </View>
@@ -559,13 +582,13 @@ const Home = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Header with Search Bar */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
           {currentUserProfile?.avatarUrl ? (
-            <Image 
-              source={{ uri: currentUserProfile.avatarUrl }} 
-              style={styles.headerAvatar} 
+            <Image
+              source={{ uri: currentUserProfile.avatarUrl }}
+              style={styles.headerAvatar}
             />
           ) : (
             <View style={styles.headerAvatarPlaceholder}>
@@ -573,8 +596,23 @@ const Home = ({ navigation }) => {
             </View>
           )}
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Home</Text>
-        <View style={styles.headerSpacer} />
+        
+        {/* Search Input */}
+        <View style={styles.searchContainer}>
+          <FontAwesome name="search" size={18} color="#999" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search users..."
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            clearButtonMode="while-editing" // iOS-specific clear button
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
+              <FontAwesome name="times-circle" size={18} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {error && (
@@ -585,10 +623,19 @@ const Home = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       )}
-      
+
       {loading && !refreshing ? (
         <ActivityIndicator size="large" style={{ marginTop: 100 }} />
-      ) : posts.length === 0 ? (
+      ) : filteredPosts.length === 0 && searchQuery ? ( // Show empty message if searching and no results
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No users found for "{searchQuery}"</Text>
+          <Text style={styles.emptySubtext}>Try a different name</Text>
+          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.refreshButton}>
+            <FontAwesome name="times" size={20} color="#4A90E2" />
+            <Text style={styles.refreshText}>Clear Search</Text>
+          </TouchableOpacity>
+        </View>
+      ) : filteredPosts.length === 0 && !searchQuery ? ( // Show general empty message if no posts at all
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No posts yet</Text>
           <Text style={styles.emptySubtext}>Create your first post or follow users</Text>
@@ -599,7 +646,7 @@ const Home = ({ navigation }) => {
         </View>
       ) : (
         <FlatList
-          data={posts}
+          data={filteredPosts} // Use filteredPosts here
           renderItem={renderPostItem}
           keyExtractor={item => item.id}
           contentContainerStyle={{ paddingBottom: 20 }}
@@ -614,7 +661,7 @@ const Home = ({ navigation }) => {
       )}
 
       {/* Floating Action Button */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate('CreatePost')}
       >
@@ -629,7 +676,7 @@ const Home = ({ navigation }) => {
               <FontAwesome name="close" size={24} color="#333" />
             </TouchableOpacity>
           </View>
-          
+
           <FlatList
             data={comments}
             keyExtractor={item => item.id}
@@ -649,7 +696,7 @@ const Home = ({ navigation }) => {
             }
             contentContainerStyle={{ flexGrow: 1 }}
           />
-          
+
           <View style={styles.commentInputContainer}>
             <TextInput
               style={styles.messageInput}
@@ -658,8 +705,8 @@ const Home = ({ navigation }) => {
               onChangeText={setNewComment}
               editable={!!user}
             />
-            <TouchableOpacity 
-              onPress={handleAddComment} 
+            <TouchableOpacity
+              onPress={handleAddComment}
               style={[
                 styles.sendButton,
                 !newComment.trim() && styles.disabledButton
@@ -676,18 +723,18 @@ const Home = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#fff' 
+  container: {
+    flex: 1,
+    backgroundColor: '#fff'
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'center', // Align items vertically in the center
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
     backgroundColor: 'white',
+    gap: 10, // Space between profile icon and search bar
   },
   headerAvatar: {
     width: 32,
@@ -709,6 +756,28 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 32,
+  },
+  // New styles for search bar
+  searchContainer: {
+    flex: 1, // Take up remaining space
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    height: 40, // Fixed height for consistency
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 0, // Remove default vertical padding
+  },
+  clearSearchButton: {
+    marginLeft: 8,
+    padding: 4, // Add padding to make touch target larger
   },
   errorContainer: {
     backgroundColor: '#ffebee',
@@ -752,57 +821,57 @@ const styles = StyleSheet.create({
     marginLeft: 5,
     fontWeight: 'bold'
   },
-  postCard: { 
-    backgroundColor: 'white', 
+  postCard: {
+    backgroundColor: 'white',
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  postHeader: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
+  postHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 12,
   },
   userInfo: {
     flex: 1,
   },
-  avatar: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     marginRight: 12,
   },
   avatarPlaceholder: {
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#ddd',
-    justifyContent: 'center', 
-    alignItems: 'center', 
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
-  username: { 
-    fontWeight: 'bold', 
+  username: {
+    fontWeight: 'bold',
     fontSize: 16,
     marginBottom: 2,
   },
-  timestamp: { 
-    fontSize: 13, 
-    color: '#777' 
+  timestamp: {
+    fontSize: 13,
+    color: '#777'
   },
-  caption: { 
-    fontSize: 15, 
+  caption: {
+    fontSize: 15,
     marginBottom: 12,
     lineHeight: 20,
   },
-  postImage: { 
-    width: '100%', 
-    height: 200, 
-    borderRadius: 8, 
+  postImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
     marginBottom: 12,
   },
-  postActions: { 
-    flexDirection: 'row', 
+  postActions: {
+    flexDirection: 'row',
     justifyContent: 'flex-start',
     gap: 24,
   },
@@ -815,16 +884,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  messageInput: { 
-    borderWidth: 1, 
-    borderColor: '#ccc', 
-    padding: 10, 
+  messageInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 10,
     borderRadius: 20,
     flex: 1
   },
-  sendButton: { 
-    backgroundColor: '#4A90E2', 
-    padding: 10, 
+  sendButton: {
+    backgroundColor: '#4A90E2',
+    padding: 10,
     borderRadius: 20,
     marginLeft: 8,
     minWidth: 60
