@@ -4,10 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Alert
 } from 'react-native';
 import { getApp } from '@react-native-firebase/app';
-import {
-  getAuth,
-  sendPasswordResetEmail
-} from '@react-native-firebase/auth';
+import { getAuth, sendPasswordResetEmail } from '@react-native-firebase/auth';
 
 const ForgotPassword = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -22,9 +19,8 @@ const ForgotPassword = ({ navigation }) => {
     setLoading(true);
 
     try {
-      const app = getApp();
-      const auth = getAuth(app);
-
+      const app = getApp(); // ✅ Get the default Firebase app
+      const auth = getAuth(app); // ✅ Get the auth instance using modular API
       await sendPasswordResetEmail(auth, email);
 
       Alert.alert(

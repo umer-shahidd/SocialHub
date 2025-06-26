@@ -14,6 +14,8 @@ import {
 import Icon from "react-native-vector-icons/Feather"
 import { getApp } from "@react-native-firebase/app"
 import { getAuth, createUserWithEmailAndPassword, updateProfile } from "@react-native-firebase/auth"
+// Import modular functions for Firestore
+import { getFirestore, collection, doc, setDoc, serverTimestamp } from "@react-native-firebase/firestore"
 
 const Signup = ({ navigation }) => {
   const [fullName, setFullName] = useState("")
@@ -47,9 +49,30 @@ const Signup = ({ navigation }) => {
     try {
       const app = getApp()
       const auth = getAuth(app)
+      const firestore = getFirestore(app); // Get Firestore instance
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-      await updateProfile(userCredential.user, { displayName: fullName })
+      const user = userCredential.user;
+
+      // 1. Update Firebase Auth profile (displayName) - good practice, but not directly used by Home
+      await updateProfile(user, { displayName: fullName });
+
+      // 2. Crucial: Save user data to Firestore 'users' collection using modular syntax
+      // Get a reference to the 'users' collection
+      const usersCollectionRef = collection(firestore, 'users');
+      // Get a document reference for the specific user using their UID
+      const userDocRef = doc(usersCollectionRef, user.uid);
+
+      // Set the data for the user document
+      await setDoc(userDocRef, {
+        username: fullName, // This is the field your Home component looks for
+        email: email,
+        avatarUrl: null, // Initialize avatarUrl as null or a default placeholder
+        bio: "", // Initialize bio as empty
+        followersCount: 0, // Initialize counts
+        followingCount: 0,
+        createdAt: serverTimestamp(), // Use modular serverTimestamp
+      });
 
       Alert.alert("Account Created", "Your account has been created successfully!", [
         { text: "OK", onPress: () => navigation.navigate("Login") },

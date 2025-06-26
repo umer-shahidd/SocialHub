@@ -32,7 +32,7 @@ const Login = ({ navigation }) => {
       setError("Please enter email and password")
       return
     }
-
+   
     setLoading(true)
     setError("")
 
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "bold",
     textAlign: "center",
-    color: "#2C2C2C",
+    color: "#050505",
     marginBottom: 8,
   },
   tagline: {

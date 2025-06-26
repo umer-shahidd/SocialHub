@@ -293,7 +293,7 @@ const Splash = () => {
           <Text style={styles.appTagline}>Mobile App</Text>
           <View style={styles.descriptionContainer}>
             <Text style={styles.description}>
-              Where stories come alive and connections flourish
+              Develop By Khanazada Ismail Khan
             </Text>
             <View style={styles.dotIndicator}>
               <View style={[styles.dot, styles.activeDot]} />
